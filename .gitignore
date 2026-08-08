@@ -1,0 +1,30 @@
+# Secrets. Never commit.
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+.next/
+*.log
+npm-debug.log*
+
+# Prisma local db
+*.db
+*.db-journal
+prisma/dev.db*
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Probe scratch output (raw responses may contain identifiers; keep local)
+scripts/probe/out/

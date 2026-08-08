@@ -1,4 +1,12 @@
 import { post } from './client';
+import {
+  GenerateApassSchema,
+  IdentityListSchema,
+  QueryApassSchema,
+  TxHashSchema,
+  VerifyApassSchema,
+  parseOrNull,
+} from './schemas';
 import type { Chain, EligibilityOutcome, QueryApassData, VerifyApassData } from './types';
 
 /**
@@ -41,7 +49,14 @@ export async function verifyEligibility(args: {
     return { signal: 'UNAVAILABLE', code: null, detail: `envelope ${res.code}: ${res.message}` };
   }
 
-  const code = res.data?.code;
+  // Boundary validation (F1-02). An unrecognised shape means we cannot assert
+  // eligibility, so we refuse rather than reading fields off an unvalidated object.
+  const parsed = parseOrNull(VerifyApassSchema, res.data);
+  if (!parsed) {
+    return { signal: 'UNAVAILABLE', code: null, detail: 'malformed verify_apass response, fail closed' };
+  }
+
+  const code = parsed.code;
   switch (code) {
     case 4:
       return { signal: 'ALLOWED', code: 4, detail: 'apass verify success' };
@@ -71,11 +86,12 @@ export async function queryIdentity(args: {
   chain: Chain;
   address: string;
 }): Promise<QueryApassData | null> {
-  const res = await post<QueryApassData>('/query_apass', {
+  const res = await post<unknown>('/query_apass', {
     chain: args.chain,
     address: args.address,
   });
-  return res.kind === 'ok' ? res.data : null;
+  if (res.kind !== 'ok') return null;
+  return parseOrNull(QueryApassSchema, res.data) as QueryApassData | null;
 }
 
 /**
@@ -101,11 +117,13 @@ export async function listIdentities(args: {
   page?: number;
   pageSize?: number;
 }): Promise<IdentityListItem[]> {
-  const res = await post<{ items: IdentityListItem[] }>('/query_apass_list', {
+  const res = await post<unknown>('/query_apass_list', {
     pageNo: args.page ?? 1,
     pageSize: args.pageSize ?? 20,
   });
-  return res.kind === 'ok' ? (res.data?.items ?? []) : [];
+  if (res.kind !== 'ok') return [];
+  const parsed = parseOrNull(IdentityListSchema, res.data);
+  return (parsed?.items ?? []) as IdentityListItem[];
 }
 
 /**
@@ -123,12 +141,16 @@ export async function freezeIdentity(args: {
   address: string;
   reason: string;
 }): Promise<{ ok: true; txHash: string } | { ok: false; detail: string }> {
-  const res = await post<{ txHash: string }>(
+  const res = await post<unknown>(
     '/update_status',
     { status: 2, wallet: { chain: args.chain, address: args.address }, blacklistReason: args.reason },
     { encrypted: true }
   );
-  if (res.kind === 'ok' && res.data?.txHash) return { ok: true, txHash: res.data.txHash };
+  if (res.kind === 'ok') {
+    const parsed = parseOrNull(TxHashSchema, res.data);
+    if (parsed) return { ok: true, txHash: parsed.txHash };
+    return { ok: false, detail: 'freeze returned success without a txHash, treat as unconfirmed' };
+  }
   const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
   return { ok: false, detail };
 }
@@ -157,7 +179,7 @@ export async function generateIdentity(args: {
   if (!/^[A-Za-z0-9]{12,}$/.test(args.customerId)) {
     return { ok: false, detail: `customerId must be >=12 alphanumeric chars, got "${args.customerId}"` };
   }
-  const res = await post<{ cvRecordId: string; wallet?: { txHash?: string } }>(
+  const res = await post<unknown>(
     '/generate_apass',
     {
       wallet: { chain: args.chain, address: args.address },
@@ -171,7 +193,11 @@ export async function generateIdentity(args: {
     },
     { encrypted: true }
   );
-  if (res.kind === 'ok') return { ok: true, cvRecordId: res.data.cvRecordId, txHash: res.data.wallet?.txHash };
+  if (res.kind === 'ok') {
+    const parsed = parseOrNull(GenerateApassSchema, res.data);
+    if (!parsed) return { ok: false, detail: 'malformed generate_apass response' };
+    return { ok: true, cvRecordId: parsed.cvRecordId, txHash: parsed.wallet?.txHash };
+  }
   const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
   return { ok: false, detail };
 }

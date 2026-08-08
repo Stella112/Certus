@@ -87,7 +87,25 @@ export async function post<T = unknown>(
   body: Record<string, unknown>,
   opts: CallOptions = {}
 ): Promise<CleanverseResult<T>> {
-  const payload = opts.encrypted ? { data: encryptBody(JSON.stringify(body)) } : body;
+  // Phase 1 audit F1-01: encryptBody(), baseUrl() and apiId() all THROW on
+  // misconfiguration. They used to sit outside the try, so a bad AES key propagated out of
+  // this function as an exception instead of a result, and the caller never got a verdict
+  // or an audit record. Everything that can throw is now inside the boundary, so this
+  // function's contract is absolute: it RETURNS a CleanverseResult and never throws.
+  let payload: Record<string, unknown>;
+  let url: string;
+  let id: string;
+  try {
+    payload = opts.encrypted ? { data: encryptBody(JSON.stringify(body)) } : body;
+    url = baseUrl() + path;
+    id = apiId();
+  } catch (err) {
+    return {
+      kind: 'unavailable',
+      reason: 'network',
+      detail: `configuration error on ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
 
   // Wait for a slot BEFORE starting the timeout clock: queueing is not a service failure.
   await acquireSlot();
@@ -95,14 +113,33 @@ export async function post<T = unknown>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? TIMEOUT_MS);
 
-  let res: Response;
   try {
-    res = await fetch(baseUrl() + path, {
+    const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'api-id': apiId() },
+      headers: { 'Content-Type': 'application/json', 'api-id': id },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
+
+    if (!res.ok) {
+      // e.g. the HTTP 500 atoken/rules returns for a wrong field name.
+      return { kind: 'unavailable', reason: 'http', detail: `HTTP ${res.status} on ${path}` };
+    }
+
+    let json: { code?: string; message?: string; data?: unknown };
+    try {
+      json = (await res.json()) as typeof json;
+    } catch (err) {
+      return { kind: 'unavailable', reason: 'parse', detail: `unparseable body on ${path}: ${String(err)}` };
+    }
+
+    const code = json.code ?? '';
+    const message = json.message ?? '';
+
+    if (code === '0000') {
+      return { kind: 'ok', code: '0000', message, data: json.data as T };
+    }
+    return { kind: 'business', code, message, data: json.data };
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
     return {
@@ -111,27 +148,9 @@ export async function post<T = unknown>(
       detail: isAbort ? `timeout after ${opts.timeoutMs ?? TIMEOUT_MS}ms on ${path}` : String(err),
     };
   } finally {
+    // F1-06: released only after the body has been read, so a slot represents the whole
+    // request lifecycle rather than just the headers.
     clearTimeout(timer);
     releaseSlot();
   }
-
-  if (!res.ok) {
-    // e.g. the HTTP 500 atoken/rules returns for a wrong field name.
-    return { kind: 'unavailable', reason: 'http', detail: `HTTP ${res.status} on ${path}` };
-  }
-
-  let json: { code?: string; message?: string; data?: unknown };
-  try {
-    json = (await res.json()) as typeof json;
-  } catch (err) {
-    return { kind: 'unavailable', reason: 'parse', detail: `unparseable body on ${path}: ${String(err)}` };
-  }
-
-  const code = json.code ?? '';
-  const message = json.message ?? '';
-
-  if (code === '0000') {
-    return { kind: 'ok', code: '0000', message, data: json.data as T };
-  }
-  return { kind: 'business', code, message, data: json.data };
 }

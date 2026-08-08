@@ -152,3 +152,142 @@ one doc gap (F-04) are carried as debt, two of them blocking.
 7. F-07/F-08 — cosmetic, no phase gate.
 
 Phase 1 may begin once items 1 and 3 are cleared and item 2 is in flight.
+
+---
+
+## PHASE 1 AUDIT: 2026-08-08T02:55Z
+
+Auditor read the files from disk and re-ran every verification independently. One claim in
+the Builder's own commit message was tested directly and found to be false.
+
+### 1. Spec compliance
+
+| Requirement (quoted from spec / Phase 1 plan) | Implemented? | File:line | Evidence |
+|---|---|---|---|
+| AC-1.1 Scaffold builds and migrates | YES | `package.json`, `prisma/migrations/` | `next build` succeeded (4 routes); `prisma migrate dev` applied `20260808011634_phase1_spine`. `npm run dev` NOT separately exercised; build success taken as stronger evidence |
+| AC-1.2 Data model migrated, AuditEvent append-only | PARTIAL | `prisma/schema.prisma` | Schema correct; grep confirms zero `auditEvent.update/delete/upsert` in `src/`. **But the required TEST does not exist.** See F1-03 |
+| AC-1.3 Cleanverse calls only in the adapter boundary, PART II headers | YES | `src/lib/cleanverse/*` | Boundary grep clean (only comment hits). Headers: cvi 5/5, cva 2/2, client 1/1. aes 1 module header for 3 exports, see F1-07 |
+| AC-1.4 AES pinned to aes-256-cbc, hard-fail on wrong length | YES | `src/lib/cleanverse/aes.ts:22-42` | Throws on non-32-byte key with an actionable message |
+| AC-1.5 Transport fail-closed with timeout | PARTIAL | `src/lib/cleanverse/client.ts:85-137` | Timeouts/network/http/parse all map to `unavailable`. **But throws bypass it entirely.** See F1-01 |
+| AC-1.6 `evaluate()` single chokepoint, Decision shape | YES, extended | `src/lib/pipeline/evaluate.ts:200` | Shape matches PART IV plus a `checks[]` array. Undocumented deviation, see F1-08 |
+| AC-1.7 Audit event written inside `evaluate()` | **NO, claim falsified** | `src/lib/pipeline/evaluate.ts:229` | Holds on the happy path and on returned failures. Does NOT hold when anything throws. See F1-01 |
+| AC-1.8 Closed reason-code enum, no free text | YES | `src/lib/pipeline/reasonCodes.ts` | 13 codes, all mapped; no Cleanverse message reaches a verdict |
+| AC-1.9 Unit tests plus 5 or more live cases | YES | `test/` | Auditor ran the suite: 25 passed (18 unit, 7 live). Live cases include FREEZE and ISOLATE |
+| AC-1.10 Seed + reset, fresh freeze target, deterministic | PARTIAL | `scripts/seed.ts` | IDs/recipients/sender identical across two runs; freezeTarget differs by design. See F1-05. Also F1-04 |
+| PART IV: "Validation: zod on every boundary" | **NO** | n/a | zod is a dependency but is never imported anywhere. See F1-02 |
+| PART VIII r1: no TODO/stub in demo paths | YES | n/a | grep clean |
+| PART VIII r8: no em-dashes in user-facing copy | YES | n/a | 3 hits, all in code comments, none in `ReasonText` or UI strings |
+
+### 2. Execution proof
+
+```
+$ npx vitest run
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+
+$ npx tsc --noEmit
+(clean)
+
+$ npx tsx scripts/probe/15-audit-resilience.ts
+AUDIT PROBE: does evaluate() fail closed when an adapter THROWS?
+  A. identity adapter throws (simulates bad AES key / missing env)
+    -> THREW: CLEANVERSE_API_KEY must Base64-decode to exactly 32 bytes  auditEventsWritten=0
+       *** no verdict, no compliance record ***
+  B. asset-rules adapter throws
+    -> THREW: boom  auditEventsWritten=0
+  C. policy check throws (simulates database unavailable)
+    -> THREW: SQLITE_CANTOPEN: unable to open database file  auditEventsWritten=0
+  D. audit writer itself throws (database down at record time)
+    -> THREW: SQLITE_CANTOPEN  auditEventsWritten=0
+  E. healthy
+    -> returned verdict=PASS  auditEventsWritten=1
+```
+
+Seed determinism, two consecutive runs (substantive fields only):
+
+```
+intent ids  : intent-milestone-001, intent-recurring-001   (identical)
+leg ids     : leg-ms-1..3, leg-rec-1..2                    (identical)
+sender      : 0x...00bb                                    (identical)
+recipients  : 10 addresses                                 (identical)
+freezeTarget: 0x9Ca6...2801  vs  0xA7D8...04f5             (DIFFERS)
+audit events: 20                                           (identical)
+```
+
+### 3. Hallucination sweep
+
+- [x] Every adapter traced to an API-TRUTH.md section.
+- [x] Zero invented endpoints, params, or fields. All 12 `VERIFIED:` tags read `SANDBOX`.
+- [x] Assumed adapters: NONE. Doc-only adapters (`download_travel_rule`, `query_txs`,
+      `faucet`) were correctly NOT implemented rather than written speculatively.
+- [x] The Builder corrected its own earlier false claim about short expirations rather than
+      leaving it standing. Verified present in API-TRUTH.md.
+
+### 4. Pipeline integrity
+
+- [x] Settlement-bypass grep: no settlement paths exist yet (no contracts). All grep hits are
+      the semaphore's `releaseSlot`, comments, or reason-code strings. Correct for Phase 1.
+- [x] All four checks execute with no short-circuit: verified by a test that fails the first
+      check and asserts `getAssetRules` and `checkPolicy` were still called.
+- [x] Verdict x trigger matrix covered by 6 explicit unit cases plus 2 live cases.
+- [ ] **Audit events written for every evaluation: FALSE under exceptions.** F1-01.
+
+### 5. Money safety
+
+- [x] No `parseFloat`, no `Number()` on amounts, no float arithmetic. Grep clean.
+- [x] Amounts are `bigint` in memory, decimal strings in the DB, and serialised via a
+      bigint-aware replacer so they cannot silently become floats.
+- [x] 6-decimal handling correct in `policies.ts` and `MONAD_ASSETS`.
+
+### 6. Findings
+
+| Severity | Finding | Location | Fix required before next phase? |
+|---|---|---|---|
+| CRITICAL | **F1-01. `evaluate()` is not exception-safe, falsifying its central claim.** The commit message and the function's own doc state it is "structurally impossible to evaluate without leaving a compliance record" and "fail-closed throughout". Both are false when an adapter throws rather than returning `unavailable`. Proven empirically for four realistic causes: bad AES key (`encryptBody` runs BEFORE the try block at `client.ts:90`), any adapter throw, database unavailable during the policy check, and the audit writer itself failing. All four produce zero audit events and no verdict. Consequence for the demo: a Cleanverse hiccup during Moment B crashes the flow instead of showing a held, recorded state, which is precisely the behaviour the product claims to prevent. | `evaluate.ts` (no try/catch), `client.ts:90` | **YES** |
+| HIGH | **F1-02. zod is never used.** PART IV mandates "zod on every boundary". It is installed and never imported. Cleanverse responses are cast with `as T` and trusted structurally; a shape change would surface as `undefined` deep in the pipeline rather than as a clean boundary rejection. | `src/lib/cleanverse/*` | YES |
+| MEDIUM | **F1-03. The append-only test required by AC-1.2 does not exist.** Append-only is currently enforced by convention plus an Auditor grep, not by a committed regression test. Nothing stops a future phase adding a mutation. | `test/` | YES (cheap) |
+| MEDIUM | **F1-04. Seed makes the sender its own recipient.** `sender = verified[0]` and that same address remains in `cleanRecipients`, so the batch demo would show a payment from an address to itself. Cosmetically wrong on a projector and analytically wrong for the budget check. | `scripts/seed.ts` | YES (cheap) |
+| MEDIUM | **F1-05. Seed determinism is partial.** All IDs, the sender, and the recipient list are byte-identical across runs, but `freezeTarget` necessarily differs because each run consumes a pool identity (freezing is irreversible). This is a justified deviation from AC-1.10, not a defect, but it is currently undocumented, and any demo script or Playwright spec MUST read the target from `data/seed-manifest.json` and never hardcode it. | `scripts/seed.ts` | Document now; binding on Phase 7 |
+| LOW | F1-06. The concurrency slot is released when `fetch` resolves, but the response body is read afterwards, so in-flight work is slightly under-counted and real concurrency can exceed the limit. Harmless at current volumes; worth tightening before the 10-recipient batch. | `client.ts:113-127` | NO |
+| LOW | F1-07. `aes.ts` carries one module-level PART II header for three exports. The header genuinely covers the whole encryption layer, so this is a documentation nit, not a traceability gap. | `aes.ts` | NO |
+| LOW | F1-08. The `Decision` type extends PART IV's shape with `checks: CheckResult[]`. The addition is necessary (the dashboard must show all four outcomes individually) and is an extension rather than a reduction, but it is an undocumented deviation. | `pipeline/types.ts` | Log in DECISIONS.md |
+
+### 7. Line-by-line review
+
+Files read in full: `client.ts`, `evaluate.ts`, `aes.ts`, `cvi.ts`, `cva.ts`, `policy.ts`,
+`policies.ts`, `reasonCodes.ts`, `types.ts`, `record.ts`, `seed.ts`, `schema.prisma`,
+both test files.
+
+- `client.ts:90` — `encryptBody()` sits outside the try block. This is the concrete origin of
+  F1-01 for the AES case. Moving it inside the try would convert a crash into a clean
+  `unavailable`, which is the correct shape.
+- `client.ts:61-77` — the semaphore arithmetic is correct: on release with a waiter, the
+  decrement and the waiter's increment cancel, so `active` never drifts. Verified by reading,
+  and indirectly by 25 tests passing under real concurrency.
+- `evaluate.ts:212-218` — `Promise.all` means one rejecting adapter discards the results of
+  the other three. Even after F1-01 is fixed, prefer `Promise.allSettled` so a single failing
+  check still yields three real outcomes for the dashboard rather than four unknowns.
+- `policy.ts:22` — `BigInt(l.amount)` on a DB string is correct and float-free. Note it throws
+  on a malformed string, which is another F1-01 path.
+- `seed.ts` — deleting rows here is legitimate (an operator reset between rehearsals) and is
+  correctly distinguished from the running system's append-only guarantee.
+
+### 8. VERDICT: FAIL
+
+The engineering quality is high and the two demo moments are genuinely proven against the
+live sandbox, which is the hard part and it is done. The verdict is FAIL for one reason: the
+Builder asserted a specific safety property in writing, that property is the product's central
+claim, and testing it directly showed it does not hold. A compliance product whose audit trail
+disappears exactly when its dependencies fail is unsound, and shipping it on the strength of an
+unverified claim is the failure mode this whole protocol exists to catch.
+
+This is a narrow, well-understood defect with an obvious fix, not a design problem.
+
+**Blocking before Phase 2:** F1-01, F1-02, F1-03, F1-04.
+
+**Document now:** F1-05, F1-08.
+
+**Carried debt:** about 5s per evaluation against the 2s UI target (Phase 6 needs per-check
+spinners and progressive row rendering); F1-05 binds Phase 7; escrow custody remains an
+inference until Phase 2 proves it with a real transfer (Phase 0 F-05); the freeze-target pool
+is down to 3 after this audit consumed 2, so top up before rehearsals.

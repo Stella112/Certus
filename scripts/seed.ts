@@ -26,21 +26,34 @@ console.log('Seeding Certus demo state...\n');
 // --- 1. Discover clean, currently-verified recipients -------------------------------
 console.log('Discovering verified Monad identities from the sandbox...');
 const listed = await listIdentities({ page: 1, pageSize: 100 });
+/**
+ * Padded addresses like 0x0000...00bb are real sandbox identities but read as test
+ * artifacts on a projector. Rank them last so the sender and the visible recipients look
+ * like plausible treasury accounts. Still fully deterministic: a stable sort on a fixed key.
+ */
+const looksSynthetic = (a: string) => /0{8,}/.test(a.slice(2));
+
 const monadCandidates = listed
   .filter((i) => i.chain?.toLowerCase() === 'monad' && i.walletAddress)
   .map((i) => i.walletAddress)
   .filter((a, idx, arr) => arr.indexOf(a) === idx)
-  .sort(); // deterministic ordering
+  .sort() // deterministic base ordering
+  .sort((a, b) => Number(looksSynthetic(a)) - Number(looksSynthetic(b)));
 
-const verified: string[] = [];
+// 11 needed: 1 sender plus 10 clean recipients. The sender must NOT also appear in the
+// recipient list (Phase 1 audit F1-04), or the batch demo shows a payment from an address
+// to itself, which is wrong on a projector and wrong for the budget calculation.
+const verifiedAll: string[] = [];
 for (const address of monadCandidates) {
-  if (verified.length >= 10) break;
+  if (verifiedAll.length >= 11) break;
   const outcome = await verifyEligibility({ chain: 'monad', atoken: MONAD_ASSETS.aToken, address });
-  if (outcome.signal === 'ALLOWED') verified.push(address);
+  if (outcome.signal === 'ALLOWED') verifiedAll.push(address);
 }
-console.log(`  found ${verified.length} verified recipients (of ${monadCandidates.length} Monad candidates)`);
+const verified = verifiedAll.slice(1); // recipients, sender excluded
+console.log(`  found ${verifiedAll.length} verified identities (of ${monadCandidates.length} Monad candidates)`);
+console.log(`  1 sender + ${verified.length} clean recipients, sender excluded from recipients`);
 
-if (verified.length < 3) {
+if (verifiedAll.length < 3) {
   console.error(
     '\nFATAL: fewer than 3 verified recipients available. The batch moment needs clean rows.\n' +
       'The sandbox may be degraded. Re-run when verify_apass is healthy.'
@@ -63,7 +76,7 @@ if (!freezeTarget) {
 console.log(`  freeze target claimed from pool: ${freezeTarget.address}`);
 
 // --- 3. Build deterministic demo state ----------------------------------------------
-const SENDER_ACME = verified[0];
+const SENDER_ACME = verifiedAll[0]; // distinct from every entry in `verified` (F1-04)
 
 await prisma.auditEvent.deleteMany({});
 await prisma.leg.deleteMany({});
@@ -144,6 +157,11 @@ const manifest = {
 };
 fs.mkdirSync(path.resolve(process.cwd(), 'data'), { recursive: true });
 fs.writeFileSync(path.resolve(process.cwd(), 'data', 'seed-manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+if (verified.includes(SENDER_ACME)) {
+  console.error('\nFATAL: sender appears in the recipient list. Refusing to seed a self-payment demo.');
+  process.exit(1);
+}
 
 console.log('\nSeed complete.');
 console.log(`  sender            : ${SENDER_ACME}`);

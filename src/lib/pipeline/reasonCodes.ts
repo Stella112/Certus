@@ -21,6 +21,14 @@ export const ReasonCode = {
   POLICY_BUDGET_EXCEEDED: 'POLICY_BUDGET_EXCEEDED',
   POLICY_RECIPIENT_NOT_ALLOWED: 'POLICY_RECIPIENT_NOT_ALLOWED',
   POLICY_WINDOW_CLOSED: 'POLICY_WINDOW_CLOSED',
+
+  // --- System integrity (Phase 1 audit F1-01) ---
+  /** A check threw instead of returning a result. Never allowed to become a PASS. */
+  SYSTEM_ERROR: 'SYSTEM_ERROR',
+  /** The compliance record could not be written. No record, no settlement. */
+  AUDIT_WRITE_FAILED: 'AUDIT_WRITE_FAILED',
+  /** A Cleanverse response did not match its schema at the adapter boundary. */
+  MALFORMED_RESPONSE: 'MALFORMED_RESPONSE',
 } as const;
 
 export type ReasonCode = (typeof ReasonCode)[keyof typeof ReasonCode];
@@ -40,4 +48,7 @@ export const ReasonText: Record<ReasonCode, string> = {
   POLICY_BUDGET_EXCEEDED: 'Spending budget exhausted for this period',
   POLICY_RECIPIENT_NOT_ALLOWED: 'Recipient is not on the approved list',
   POLICY_WINDOW_CLOSED: 'Outside the permitted settlement window',
+  SYSTEM_ERROR: 'Compliance check failed to complete, settlement held',
+  AUDIT_WRITE_FAILED: 'Compliance record could not be written, settlement held',
+  MALFORMED_RESPONSE: 'Identity service returned an unrecognised response, settlement held',
 };

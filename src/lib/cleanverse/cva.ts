@@ -1,5 +1,6 @@
 import { post } from './client';
-import type { ATokenRule, ATokenRulesData, Chain } from './types';
+import { ATokenRulesSchema, parseOrNull } from './schemas';
+import type { ATokenRule, Chain } from './types';
 
 /**
  * Assets (A-Token = CVA) adapters. Traced to docs/API-TRUTH.md § Assets.
@@ -31,11 +32,15 @@ export async function getAssetRules(args: {
   chain: Chain;
   atokenAddress: string;
 }): Promise<ATokenRule[] | null> {
-  const res = await post<ATokenRulesData>('/atoken/rules', {
+  const res = await post<unknown>('/atoken/rules', {
     chain: args.chain,
     atoken_address: args.atokenAddress,
   });
-  return res.kind === 'ok' ? (res.data?.rules ?? []) : null;
+  if (res.kind !== 'ok') return null;
+  // F1-02: validate at the boundary. null propagates to ASSET_RULES_UNAVAILABLE (fail closed)
+  // rather than silently becoming an empty rule set, which would read as "ungated".
+  const parsed = parseOrNull(ATokenRulesSchema, res.data);
+  return parsed ? (parsed.rules as ATokenRule[]) : null;
 }
 
 /**

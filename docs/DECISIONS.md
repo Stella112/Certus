@@ -93,6 +93,31 @@ run a control case before recording a constraint as truth.
 
 ---
 
+## 2026-08-08 — Phase 1 audit remediation
+
+**D8. `Decision` extends the PART IV shape with `checks: CheckResult[]`.** (Audit F1-08.)
+PART IV specifies `{ verdict: 'PASS' }` etc. Certus adds the array of all four individual
+check outcomes. This is an EXTENSION, never a reduction: the oversight dashboard is required
+to show each check with its own reason code (PART V), which is impossible if the verdict
+discards them. Logged so the deviation is deliberate and visible.
+
+**D9. Seed determinism is intentionally partial.** (Audit F1-05.)
+Intent IDs, leg IDs, the sender, the recipient list, and the historical event set are
+byte-identical across runs. `freezeTarget` deliberately differs every run, because freezing
+an A-Pass is irreversible in UAT (D6) so each rehearsal must burn a fresh identity.
+**Binding on Phase 7:** every demo script and Playwright spec MUST read the freeze target
+from `data/seed-manifest.json`. Hardcoding it will pass once and fail every rehearsal after.
+
+**D10. NO RECORD, NO SETTLEMENT.** (Audit F1-01, the critical finding.)
+`evaluate()` now guarantees three things: it never throws, a check that throws becomes an
+explicit `SYSTEM_ERROR` failure rather than being lost, and if the audit event cannot be
+written the verdict is downgraded to `FAIL(AUDIT_WRITE_FAILED)`. The last one is the
+important principle: a settlement with no compliance record is the single outcome this
+product may never produce, so an unwritable audit trail must block settlement rather than be
+logged and ignored. Pinned by `test/unit/evaluate.resilience.test.ts`.
+
+---
+
 ## Throwaway artifacts (not part of the product)
 
 - scripts/probe/* : Phase 0 probes. Scrappy by design. Superseded by src/lib/cleanverse in Phase 1.

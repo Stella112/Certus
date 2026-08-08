@@ -15,11 +15,15 @@ import type { CheckName, CheckResult, Decision, EvaluationContext, Trigger } fro
  * Auditor: grep for any settlement that does not route through this function.
  * Any such path is a CRITICAL finding.
  *
- * Two properties this function guarantees structurally, not by convention:
+ * Three properties this function guarantees structurally, not by convention:
  *  1. ALL FOUR checks execute on every call. Nothing short-circuits, so the dashboard
  *     always has four individual outcomes to display.
- *  2. An audit event is written INSIDE this function, so it is impossible to evaluate
- *     without leaving a compliance record.
+ *  2. This function NEVER throws. Every failure mode, including an adapter that throws,
+ *     resolves to a Decision with a closed reason code. Verified by
+ *     test/unit/evaluate.resilience.test.ts.
+ *  3. Either an audit event is written, or the verdict is not a PASS. A settlement with no
+ *     compliance record is the one outcome this product may never produce, so a failed
+ *     audit write downgrades the verdict to FAIL(AUDIT_WRITE_FAILED).
  *
  * Every input that influences whether money moves is fetched FRESH here. Nothing is read
  * from a cache or a projection. If Cleanverse is unreachable, we FAIL CLOSED.
@@ -199,20 +203,52 @@ function verdictFor(trigger: Trigger, reason: ReasonCode): 'FAIL' | 'ISOLATE' | 
 /** Order matters: the first failing check supplies the primary reason code. */
 const CHECK_ORDER: CheckName[] = ['SENDER_CVI', 'RECIPIENT_CVI', 'ASSET_RULES', 'POLICY'];
 
+/**
+ * Convert a settled promise into a CheckResult. A REJECTED check never becomes a pass:
+ * it becomes an explicit SYSTEM_ERROR failure (Phase 1 audit F1-01).
+ */
+function settledToCheck(
+  name: CheckName,
+  settled: PromiseSettledResult<CheckResult>
+): CheckResult {
+  if (settled.status === 'fulfilled') return settled.value;
+  const message = settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+  return {
+    check: name,
+    passed: false,
+    reason: ReasonCode.SYSTEM_ERROR,
+    detail: `Fail closed: check did not complete (${message})`,
+    evidence: { failClosed: true, threw: true },
+  };
+}
+
 export async function evaluate(ctx: EvaluationContext, deps: EvaluateDeps = defaultDeps): Promise<Decision> {
-  // All four run. Nothing short-circuits. Parallel for latency, not for skipping work.
-  const [senderOutcome, recipientOutcome, assetCheck, policyCheck] = await Promise.all([
-    deps.verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.senderAddress }),
-    deps.verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.recipientAddress }),
+  /*
+   * Phase 1 audit F1-01. Previously any adapter that THREW (bad AES key, database down,
+   * malformed amount) escaped this function as an exception: no verdict, and no audit
+   * event. That falsified the guarantee stated above. Two changes fix it:
+   *
+   *  1. allSettled, not all. One rejecting check no longer discards the other three, so a
+   *     partial failure still yields real outcomes for the other checks in the dashboard.
+   *  2. A rejected check becomes an explicit SYSTEM_ERROR failure, so it can never be read
+   *     as a pass.
+   */
+  const settled = await Promise.allSettled([
+    deps
+      .verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.senderAddress })
+      .then((o) => eligibilityToCheck('SENDER_CVI', o)),
+    deps
+      .verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.recipientAddress })
+      .then((o) => eligibilityToCheck('RECIPIENT_CVI', o)),
     checkAssetRules(ctx, deps),
-    deps.checkPolicy(ctx),
+    Promise.resolve().then(() => deps.checkPolicy(ctx)),
   ]);
 
   const checks: CheckResult[] = [
-    eligibilityToCheck('SENDER_CVI', senderOutcome),
-    eligibilityToCheck('RECIPIENT_CVI', recipientOutcome),
-    assetCheck,
-    policyCheck,
+    settledToCheck('SENDER_CVI', settled[0]),
+    settledToCheck('RECIPIENT_CVI', settled[1]),
+    settledToCheck('ASSET_RULES', settled[2]),
+    settledToCheck('POLICY', settled[3]),
   ];
 
   const failed = CHECK_ORDER.map((name) => checks.find((c) => c.check === name)).filter(
@@ -228,25 +264,43 @@ export async function evaluate(ctx: EvaluationContext, deps: EvaluateDeps = defa
     decision = { verdict: verdictFor(ctx.trigger, reason), reason, detail: primary.detail, checks };
   }
 
-  // Written inside evaluate(): there is no way to evaluate without a compliance record.
-  await deps.recordEvent({
-    intentId: ctx.intentId ?? null,
-    legId: ctx.legId ?? null,
-    eventType:
-      decision.verdict === 'FREEZE' ? 'FREEZE' : decision.verdict === 'ISOLATE' ? 'ISOLATE' : 'CHECK_RUN',
-    trigger: ctx.trigger,
-    verdict: decision.verdict,
-    reasonCode: decision.verdict === 'PASS' ? null : decision.reason,
-    checkResults: checks,
-    payload: {
-      chain: ctx.chain,
-      atoken: ctx.atoken,
-      sender: ctx.senderAddress,
-      recipient: ctx.recipientAddress,
-      amount: ctx.amount.toString(),
-      policyId: ctx.policyId,
-    },
-  });
+  /*
+   * NO RECORD, NO SETTLEMENT.
+   *
+   * If the compliance record cannot be written, we must not hand back a PASS: a settlement
+   * with no audit trail is precisely what this product exists to prevent. So a failed write
+   * downgrades the verdict rather than being swallowed or thrown.
+   */
+  try {
+    await deps.recordEvent({
+      intentId: ctx.intentId ?? null,
+      legId: ctx.legId ?? null,
+      eventType:
+        decision.verdict === 'FREEZE' ? 'FREEZE' : decision.verdict === 'ISOLATE' ? 'ISOLATE' : 'CHECK_RUN',
+      trigger: ctx.trigger,
+      verdict: decision.verdict,
+      reasonCode: decision.verdict === 'PASS' ? null : decision.reason,
+      checkResults: checks,
+      payload: {
+        chain: ctx.chain,
+        atoken: ctx.atoken,
+        sender: ctx.senderAddress,
+        recipient: ctx.recipientAddress,
+        amount: ctx.amount.toString(),
+        policyId: ctx.policyId,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Loud, because a silent audit failure is the worst possible failure in this product.
+    console.error(`[certus] CRITICAL: audit write failed, refusing settlement. ${message}`);
+    return {
+      verdict: 'FAIL',
+      reason: ReasonCode.AUDIT_WRITE_FAILED,
+      detail: `Fail closed: compliance record could not be written (${message})`,
+      checks,
+    };
+  }
 
   return decision;
 }

@@ -12,12 +12,13 @@ import type { ATokenRule, Chain } from './types';
  * Now Base Sepolia (DECISIONS.md D11); was Monad until its faucet reservoir proved empty.
  * Confirmed via query_deposit_atoken_list 2026-08-08.
  */
-export function assets() {
-  const c = chainConfig();
+export function assets(chain?: string) {
+  const c = chainConfig(chain);
   return {
     chain: c.cleanverseChain as Chain,
     originToken: c.originToken,
     aToken: c.aToken,
+    /** Per chain. BNB Chain is 18dp while the others are 6dp, so never hardcode this. */
     decimals: c.decimals,
     symbol: 'aUSDC',
   } as const;

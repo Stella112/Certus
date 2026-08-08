@@ -20,5 +20,8 @@
   "roles": {
     "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
     "releaser": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E"
-  }
+  },
+  "chainKey": "base",
+  "hackathonEligible": false,
+  "note": "NOT hackathon-eligible. Retained because the escrow was first proven here; the submission must not depend on it."
 }

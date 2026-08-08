@@ -1,82 +1,147 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 
 /**
- * THE single typed source of network and asset configuration.
+ * MULTI-CHAIN registry. Certus settles on more than one chain, so chain is a per-intent
+ * property, not a global mode.
  *
- * PART IV: "Every network value lives in exactly one typed config module. No magic numbers,
- * no inline RPC strings anywhere in the codebase." The Auditor greps for `http` outside
- * .env and this file; any other hit is a MAJOR finding.
+ * This replaces an earlier single-chain singleton that read one chain out of .env. That
+ * shape forced the whole build to be flipped between chains one at a time, which is churn
+ * and is wrong for a product whose compliance claim spans registries: an A-Pass is scoped to
+ * (chain, address), so a counterparty verified on one chain is NOT thereby verified on
+ * another. Certus has to hold several chains in mind at once to say anything honest about a
+ * cross-chain payment.
  *
- * Settlement chain is Base Sepolia, not Monad (DECISIONS.md D11): the Monad USDC faucet
- * reservoir is empty and its origin token is a permissioned Circle FiatToken, so no test
- * value is obtainable there. Base Sepolia dispensed on the first call. Cleanverse hosts the
- * hackathon and permits six chains, so this costs nothing in sponsor alignment.
+ * Network parameters live in config/chains.json, checked in, because none of them are secret
+ * and a fresh clone should not have to rediscover them. Only credentials stay in .env.
  */
 
-const ConfigSchema = z.object({
-  /** Chain identifier as CLEANVERSE names it, sent in every API call. */
+const ChainSchema = z.object({
   cleanverseChain: z.string().min(1),
-  chainId: z.coerce.number().int().positive(),
+  label: z.string().min(1),
+  chainId: z.number().int().positive(),
   rpcUrl: z.string().url(),
   rpcFallbackUrl: z.string().url().optional(),
   explorerUrl: z.string().url(),
-  /** Ungated ERC20 the escrow custodies (custody design (c), DECISIONS.md D1). */
+  nativeSymbol: z.string().min(1),
   originToken: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  /** Compliance-enforcing A-Token the recipient ultimately receives. */
   aToken: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
-  /** BOTH tokens are 6 decimals here. Assuming 18 would be a 10^12 error. */
-  decimals: z.coerce.number().int().min(0).max(18),
+  decimals: z.number().int().min(0).max(18),
+  /** Whether the Cleanverse Build announcement permits deploying here. */
+  hackathonEligible: z.boolean(),
+  /** True only if the chainId was confirmed with a live `cast chain-id`, never from memory. */
+  chainIdVerified: z.boolean().optional().default(false),
+  usdcSource: z.enum(['circle-faucet', 'cleanverse-faucet', 'unknown']).optional().default('unknown'),
+  notes: z.string().optional(),
 });
 
-export type ChainConfig = z.infer<typeof ConfigSchema>;
+const RegistrySchema = z.object({
+  defaultChain: z.string().min(1),
+  chains: z.record(z.string(), ChainSchema),
+});
 
-let cached: ChainConfig | null = null;
+export type ChainConfig = z.infer<typeof ChainSchema>;
+export type ChainKey = string;
 
-export function chainConfig(): ChainConfig {
+let cached: z.infer<typeof RegistrySchema> | null = null;
+
+function registry() {
   if (cached) return cached;
-  const parsed = ConfigSchema.safeParse({
-    cleanverseChain: process.env.CHAIN_NAME,
-    chainId: process.env.CHAIN_ID,
-    rpcUrl: process.env.RPC_URL,
-    rpcFallbackUrl: process.env.RPC_FALLBACK_URL || undefined,
-    explorerUrl: process.env.EXPLORER_URL,
-    originToken: process.env.ORIGIN_TOKEN,
-    aToken: process.env.ATOKEN,
-    decimals: process.env.TOKEN_DECIMALS,
-  });
+  const file = path.resolve(process.cwd(), 'config', 'chains.json');
+  if (!fs.existsSync(file)) throw new Error(`Chain registry missing at ${file}`);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete raw._comment;
+  const parsed = RegistrySchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(
-      'Chain configuration is invalid or missing in .env:\n' +
-        parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')
+      'config/chains.json is invalid:\n' + parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')
     );
+  }
+  if (!parsed.data.chains[parsed.data.defaultChain]) {
+    throw new Error(`defaultChain "${parsed.data.defaultChain}" is not present in chains`);
   }
   cached = parsed.data;
   return cached;
 }
 
-/** Explorer link for a transaction. The dashboard links every settlement through this. */
-export function txUrl(txHash: string): string {
-  return `${chainConfig().explorerUrl}/tx/${txHash}`;
+/** Every configured chain key. */
+export function listChains(): ChainKey[] {
+  return Object.keys(registry().chains);
 }
 
-export function addressUrl(address: string): string {
-  return `${chainConfig().explorerUrl}/address/${address}`;
+/**
+ * Chains the submission may actually deploy on. Base is deliberately excluded: Cleanverse
+ * supports it, but the hackathon announcement does not list it, and shipping a submission
+ * that settles on an ineligible chain would be a scoring failure, not a technical one.
+ */
+export function eligibleChains(): ChainKey[] {
+  return listChains().filter((k) => registry().chains[k].hackathonEligible);
 }
 
-/** Format base units for display without ever using floating point. */
-export function formatAmount(baseUnits: bigint, decimals = chainConfig().decimals): string {
+/** Throws if the chain cannot carry submission work. Call before any deploy. */
+export function assertEligible(chain: ChainKey): void {
+  if (!chainConfig(chain).hackathonEligible) {
+    throw new Error(
+      `Chain "${chain}" is NOT hackathon-eligible. Eligible: ${eligibleChains().join(', ')}. ` +
+        'Deploying the submission here would not count.'
+    );
+  }
+}
+
+/**
+ * The chain used when a caller does not specify one (seeds, single-chain demos).
+ * DEFAULT_CHAIN in .env overrides config/chains.json, so an operator can switch the demo
+ * chain without editing checked-in config.
+ */
+export function defaultChain(): ChainKey {
+  const override = process.env.DEFAULT_CHAIN?.trim();
+  if (override) {
+    if (!registry().chains[override]) {
+      throw new Error(`DEFAULT_CHAIN="${override}" is not in config/chains.json (have: ${listChains().join(', ')})`);
+    }
+    return override;
+  }
+  return registry().defaultChain;
+}
+
+export function chainConfig(chain: ChainKey = defaultChain()): ChainConfig {
+  const c = registry().chains[chain];
+  if (!c) throw new Error(`Unknown chain "${chain}". Configured: ${listChains().join(', ')}`);
+  return c;
+}
+
+export function txUrl(txHash: string, chain: ChainKey = defaultChain()): string {
+  return `${chainConfig(chain).explorerUrl}/tx/${txHash}`;
+}
+
+export function addressUrl(address: string, chain: ChainKey = defaultChain()): string {
+  return `${chainConfig(chain).explorerUrl}/address/${address}`;
+}
+
+/** Format base units for display. Never uses floating point. */
+export function formatAmount(baseUnits: bigint, chain: ChainKey = defaultChain()): string {
+  const decimals = chainConfig(chain).decimals;
   const negative = baseUnits < 0n;
   const abs = negative ? -baseUnits : baseUnits;
   const divisor = 10n ** BigInt(decimals);
-  const whole = abs / divisor;
   const frac = (abs % divisor).toString().padStart(decimals, '0');
-  return `${negative ? '-' : ''}${whole.toString()}${decimals > 0 ? '.' + frac : ''}`;
+  return `${negative ? '-' : ''}${(abs / divisor).toString()}${decimals > 0 ? '.' + frac : ''}`;
 }
 
-/** Parse a decimal string into base units. Never accepts a float. */
-export function parseAmount(value: string, decimals = chainConfig().decimals): bigint {
+/** Parse a decimal string into base units. Rejects anything that is not exact. */
+export function parseAmount(value: string, chain: ChainKey = defaultChain()): bigint {
+  const decimals = chainConfig(chain).decimals;
   if (!/^\d+(\.\d+)?$/.test(value)) throw new Error(`Invalid amount "${value}"`);
   const [whole, frac = ''] = value.split('.');
-  if (frac.length > decimals) throw new Error(`Amount "${value}" exceeds ${decimals} decimal places`);
+  if (frac.length > decimals) throw new Error(`Amount "${value}" exceeds ${decimals} decimal places on ${chain}`);
   return BigInt(whole + frac.padEnd(decimals, '0'));
+}
+
+/** Deployed contract addresses for a chain, from deployments/<chain>.json. */
+export function deployment(chain: ChainKey = defaultChain()): { escrow?: string } {
+  const file = path.resolve(process.cwd(), 'deployments', `${chain}.json`);
+  if (!fs.existsSync(file)) return {};
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return { escrow: raw?.contracts?.CertusEscrow?.address };
 }

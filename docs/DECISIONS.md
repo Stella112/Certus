@@ -120,7 +120,21 @@ logged and ignored. Pinned by `test/unit/evaluate.resilience.test.ts`.
 
 ## 2026-08-08 — SCOPE DEVIATION: settlement chain Monad -> Base Sepolia
 
-**D11. The demo deploys on Base Sepolia (chainId 84532), not Monad.**
+**D11. SUPERSEDED on the same day by D13. Kept for the paper trail, not as guidance.**
+
+> **Two errors in this entry, corrected below.**
+> 1. It claims Base is permitted. **It is not.** The announcement lists Ethereum, Arbitrum,
+>    Polygon, Avalanche, BNB Chain, Monad. Base is absent. I read the list, then wrote the
+>    opposite, and deployed on an ineligible chain.
+> 2. The premise "Monad has no obtainable USDC" was also wrong. Monad's origin token is
+>    Circle FiatToken, so USDC comes from faucet.circle.com, not the Cleanverse faucet.
+>    The Cleanverse faucet being dry was never the binding constraint.
+>
+> The deeper mistake: moving chain to fix an asset-level problem. aUSDC's institutional
+> whitelist blocks third-party minting on EVERY chain, so no chain would have fixed it.
+> See D12.
+
+**D11 (original). The demo deploys on Base Sepolia (chainId 84532), not Monad.**
 
 The build spec pinned Monad and asserted "Monad is the chain sponsor". That premise was
 wrong. The actual hackathon announcement (Cleanverse Build: Trusted Assets, 48h sprint
@@ -172,3 +186,62 @@ attempt. The user funds it.
 - scripts/probe/* : Phase 0 probes. Scrappy by design. Superseded by src/lib/cleanverse in Phase 1.
 - Throwaway freeze-test identity 0x820350D47277784A26FF4D4cE08C12CAD6F19094 is now frozen and
   cannot be reactivated (F2). Disposable, unused elsewhere, will not be reused.
+
+---
+
+## 2026-08-08 — D12: Certus issues its own A-Token (cvUSD)
+
+**Problem.** aUSDC carries an institutional deposit whitelist that third parties cannot join
+(confirmed by Cleanverse support). Circle's faucet is whitelisted; our escrow never can be.
+So no contract we write can cause aUSDC to be minted, and "settlement lands as a verified
+asset" was unprovable with aUSDC. Testing on two chains produced identical behaviour, which
+is what showed the constraint is the ASSET, not the chain. Hopping chains was the wrong
+diagnosis and cost time.
+
+**Decision.** Certus issues and governs its own A-Token: **cvUSD**,
+`0x5e7Ca7ec42A11B4F5259fc429AcD32dFFf83796D` on Monad, 6dp, admin = our treasury,
+rule `min_tier: 5`. Issued via POST /atoken/launch, confirmed ISSUED in seconds.
+
+**Why this is better than a workaround.** It is strictly stronger than borrowing aUSDC: the
+product claim becomes "Certus defines the compliance rules on its own verified asset and
+enforces them on every settlement", instead of depending on an asset whose rules and whitelist
+belong to someone else. Verified live: an active identity returns 4, a frozen identity returns
+APassNotActive, an unverified address returns 2, and the rules read back as ours.
+
+**Not yet proven, so not yet claimed.** How holders actually receive cvUSD.
+`add_whitelist_for_institutional` requires `address_list`, and no mint/distribute path is
+confirmed. Until it is, escrow releases settle in the origin token and we say "settlement to
+verified counterparties", not "settlement in verified assets".
+
+---
+
+## 2026-08-08 — D13: multi-chain by construction, settling on Monad
+
+**Supersedes D11.** Certus is multi-chain, so chain is a per-intent property, not a global
+mode. The earlier single-chain singleton in .env is what forced the build to be flipped
+between chains one at a time, which was churn and produced a deployment on an ineligible one.
+
+**Registry.** `config/chains.json` holds every chain, checked in because none of it is secret
+and a fresh clone should not rediscover it. `hackathonEligible` is explicit, and
+`assertEligible()` throws before any deploy, so the Base mistake cannot repeat silently.
+
+Eligible AND supported by Cleanverse (the real target set):
+| chain | chainId (live-verified) | status |
+|---|---|---|
+| monad | 10143 | **primary.** Funded (20 USDC + 5 MON), escrow deployed, cvUSD issued |
+| polygon | 80002 | second Circle-faucet chain, natural cross-chain pair. Not funded |
+| bsc | 97 | usable but **18 decimals and a different aToken**. Not funded |
+| ethereum | 11155111 | which network Cleanverse means is UNCONFIRMED. Sepolia gas is scarce |
+
+Eligible but unusable: Arbitrum, Avalanche return NO A-Token pairs.
+Usable but ineligible: Base. Retained as a test chain only; the submission must not rely on it.
+
+**Deployments.** CertusEscrow is live on both monad and base at
+`0xb327709Ec4f0830722776746b1da42F98d51868e` (same deployer + nonce gives the same CREATE
+address). Recorded per chain in `deployments/<chain>.json`.
+
+**Scope honesty on "cross-chain".** Certus does NOT bridge value and will not pretend to.
+Its cross-chain contribution is the dual-registry check: an A-Pass is scoped to
+(chain, address), so a counterparty verified on one chain is NOT thereby verified on another,
+and a payment spanning chains must satisfy both registries. That is a compliance claim we can
+actually implement and defend. Building a bridge is out of scope for 48 hours.

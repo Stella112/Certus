@@ -1,0 +1,100 @@
+{
+  "_comment": "Per-chain network and asset parameters. Checked in deliberately: none of it is secret, and a single typed registry is what makes Certus multi-chain rather than one-chain-at-a-time. Secrets stay in .env. Every chainId here was verified live with `cast chain-id`; every token pair came from a live POST /query_deposit_atoken_list. Nothing in this file is from memory.",
+  "_eligibility": "hackathonEligible reflects the Cleanverse Build announcement: Ethereum, Arbitrum, Polygon, Avalanche, BNB Chain, Monad. Arbitrum and Avalanche are eligible but Cleanverse returned NO A-Token pairs for them, so they are not usable. Base is usable but NOT eligible, so it must not carry the submission.",
+  "defaultChain": "monad",
+  "chains": {
+    "monad": {
+      "cleanverseChain": "monad",
+      "label": "Monad Testnet",
+      "chainId": 10143,
+      "rpcUrl": "https://testnet-rpc.monad.xyz",
+      "rpcFallbackUrl": "https://rpc.ankr.com/monad_testnet",
+      "explorerUrl": "https://testnet.monadscan.com",
+      "nativeSymbol": "MON",
+      "originToken": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
+      "aToken": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+      "decimals": 6,
+      "hackathonEligible": true,
+      "chainIdVerified": true,
+      "usdcSource": "circle-faucet",
+      "notes": "Origin token is Circle FiatToken v2, so USDC comes from faucet.circle.com (Monad Testnet), not the Cleanverse faucet whose reservoir here is empty. Funded and ready.",
+      "selfIssuedAToken": {
+        "address": "0x5e7Ca7ec42A11B4F5259fc429AcD32dFFf83796D",
+        "symbol": "cvUSD",
+        "decimals": 6,
+        "adminAddress": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+        "issueTx": "0x00e9ffe14e6da7f2bb8b6e7942a4f84555d7f1f1cb4e124ba418858419f07802",
+        "requestId": "IA20260808205025557489",
+        "rule": {
+          "min_tier": 5,
+          "min_sub_tier": 0,
+          "is_black_list": false,
+          "countries": []
+        },
+        "note": "Certus-issued A-Token. All four pipeline checks verified against it. Unlike aUSDC we control its institutional whitelist, which is the only route to real A-Token settlement."
+      }
+    },
+    "polygon": {
+      "cleanverseChain": "polygon",
+      "label": "Polygon Amoy",
+      "chainId": 80002,
+      "rpcUrl": "https://polygon-amoy-bor-rpc.publicnode.com",
+      "rpcFallbackUrl": "https://rpc-amoy.polygon.technology",
+      "explorerUrl": "https://amoy.polygonscan.com",
+      "nativeSymbol": "POL",
+      "originToken": "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582",
+      "aToken": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+      "decimals": 6,
+      "hackathonEligible": true,
+      "chainIdVerified": true,
+      "usdcSource": "circle-faucet",
+      "notes": "Second Circle-faucet chain, so the natural pair with Monad for a cross-chain demo. rpc-amoy.polygon.technology was unreachable from here; publicnode works."
+    },
+    "bsc": {
+      "cleanverseChain": "bsc",
+      "label": "BNB Smart Chain Testnet",
+      "chainId": 97,
+      "rpcUrl": "https://bsc-testnet-rpc.publicnode.com",
+      "explorerUrl": "https://testnet.bscscan.com",
+      "nativeSymbol": "tBNB",
+      "originToken": "0x6f4A0EFe923fD35434fBC564654550467613EE5F",
+      "aToken": "0x8e74D3E3ab086152ba58276F6376f7b9fBA54d27",
+      "decimals": 18,
+      "hackathonEligible": true,
+      "chainIdVerified": true,
+      "usdcSource": "unknown",
+      "notes": "WARNING: 18 decimals and a DIFFERENT aToken address from the other chains. Any code that assumes 6dp or a single canonical aToken is wrong here. Not funded."
+    },
+    "ethereum": {
+      "cleanverseChain": "ethereum",
+      "label": "Ethereum Sepolia (assumed)",
+      "chainId": 11155111,
+      "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+      "explorerUrl": "https://sepolia.etherscan.io",
+      "nativeSymbol": "ETH",
+      "originToken": "0xF3b9fa48aA249A4032D0B2A4899048CCB92d1A96",
+      "aToken": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+      "decimals": 6,
+      "hackathonEligible": true,
+      "chainIdVerified": true,
+      "usdcSource": "unknown",
+      "notes": "UNCONFIRMED which network Cleanverse means by 'ethereum'. Sepolia is an assumption, not a verified fact: confirm the origin token exists at that address on Sepolia before deploying. Sepolia gas is also scarce."
+    },
+    "base": {
+      "cleanverseChain": "base",
+      "label": "Base Sepolia",
+      "chainId": 84532,
+      "rpcUrl": "https://base-sepolia-rpc.publicnode.com",
+      "rpcFallbackUrl": "https://base-sepolia.drpc.org",
+      "explorerUrl": "https://sepolia.basescan.org",
+      "nativeSymbol": "ETH",
+      "originToken": "0x543b96420d072BF587B63C41C0B0922762E986Ce",
+      "aToken": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+      "decimals": 6,
+      "hackathonEligible": false,
+      "chainIdVerified": true,
+      "usdcSource": "cleanverse-faucet",
+      "notes": "NOT hackathon-eligible. Retained only because the escrow was first proven here and it is a useful low-cost test chain. The submission must not depend on it."
+    }
+  }
+}

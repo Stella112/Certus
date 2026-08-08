@@ -304,6 +304,83 @@ Live run against the real contract and the real sandbox:
 | Quarantined funds stay put, not refunded | **PROVEN.** Escrow still holds 100000 after freeze |
 | Value lands AS a verified asset (aUSDC) | **NOT PROVEN — see below** |
 
+## SELF-ISSUED A-TOKEN — ISSUED AND WORKING (the unlock, 2026-08-08)
+
+`POST /atoken/launch` (AES). Field set discovered one server complaint at a time, never
+guessed. Fields that do NOT exist: `origin_token`, `name`, `symbol` — so launch mints a NEW
+A-Token, it does not wrap an existing ERC20.
+
+```jsonc
+{
+  "chain": "monad",
+  "admin_address": "<we control this>",
+  "rule": { "allowed_group":"", "allowed_sub_group":"", "min_tier":5,
+            "min_sub_tier":0, "is_black_list":false, "countries":[] },
+  "decimals": 6,
+  "icon": "<url>",
+  "token_name": "Certus Verified USD",
+  "token_symbol": "cvUSD"
+}
+```
+Response: `{"todo":true,"requestId":"IA20260808205025557489","issueAssetId":330}`
+
+Status is **GET** `/atoken/query_apply_status/{requestId}` (POST returns 405; there is no
+body form). Issuance completed in seconds, not the long approval wait PART XI warned about:
+```json
+{"flowType":"LAUNCH","applyStatus":"ISSUED","chain":"monad",
+ "atokenAddress":"0x5e7Ca7ec42A11B4F5259fc429AcD32dFFf83796D","tokenSymbol":"cvUSD",
+ "txHash":"0x00e9ffe14e6da7f2bb8b6e7942a4f84555d7f1f1cb4e124ba418858419f07802"}
+```
+
+**cvUSD `0x5e7Ca7ec42A11B4F5259fc429AcD32dFFf83796D` (Monad, 6dp), verified live:**
+
+| Probe | Result |
+|---|---|
+| on-chain `symbol()` / `decimals()` | `cvUSD` / 6, real contract |
+| `verify_apass` for an active identity | `data.code = 4` |
+| `verify_apass` for a frozen identity | `APassNotActive` — the freeze signal fires |
+| `verify_apass` for a no-A-Pass address | `data.code = 2` |
+| `atoken/rules` | `min_tier: 5` — **a rule we defined ourselves** |
+
+All four pipeline checks work against an asset Certus issues and governs. Note it does NOT
+appear in `query_deposit_atoken_list`, which lists deposit-wrappable pairs only.
+
+Still open: how holders receive cvUSD (`add_whitelist_for_institutional` needs `address_list`;
+a mint/distribute path is not yet identified). Until that is proven, do not claim escrow
+releases settle in cvUSD.
+
+### WHY the aUSDC wrap fails, and why chain-hopping was the wrong fix
+
+Tested on BOTH chains. Identical behaviour: the per-identity deposit wallet sweeps and
+forwards the ORIGIN token to the identity's own address. No A-Token is ever minted.
+
+```
+Monad run: escrow -> deposit 0x4D2830F8… (500000 USDC)
+           t+~15s   deposit 0 ; recipient USDC 500000 ; recipient aUSDC 0
+```
+
+Cleanverse support explains it: **aUSDC carries an institutional deposit whitelist, and
+third parties cannot add themselves to it.**
+
+> "Only self-issued Wrapped CVAs can manage their own deposit whitelist of institutional
+> addresses using `add_whitelist_for_institutional`. AUSDC does not allow users to add their
+> own. However, you can obtain the deposit address through the API, then go to Circle Faucet,
+> select the Monad/Polygon Testnet network, enter the deposit address, and your wallet address
+> will receive AUSDC."
+
+So the Circle faucet is whitelisted and our escrow is not. **No arbitrary contract can ever
+mint aUSDC.** This is a property of that specific asset, not a bug in our design, and no
+amount of retrying on other chains would have fixed it. Chasing the chain was the wrong
+diagnosis; the constraint is the asset.
+
+**The unlock: issue our OWN Wrapped CVA.** A self-issued A-Token can manage its own
+institutional whitelist, so Certus can authorise its escrow as a depositor and have releases
+land as a genuine compliance-enforcing asset. That also strengthens the story rather than
+weakening it: Certus defines the compliance rules on its own verified asset instead of
+borrowing someone else's. Path: `POST /atoken/launch` -> poll
+`GET /atoken/query_apply_status/{requestId}` until ISSUED -> `add_whitelist_for_institutional`.
+Risk: issuance is asynchronous and gated by an approval flow we do not control the timing of.
+
 ### The deposit route does NOT wrap into aUSDC (corrects an earlier assumption)
 
 We released into the recipient's per-identity `depositUSDCWallet` expecting it to mint aUSDC.

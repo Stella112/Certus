@@ -1,0 +1,28 @@
+{
+  "network": "monad-testnet",
+  "chainKey": "monad",
+  "chainId": 10143,
+  "hackathonEligible": true,
+  "explorer": "https://testnet.monadscan.com",
+  "deployedAt": "2026-08-08T12:40:00Z",
+  "contracts": {
+    "CertusEscrow": {
+      "address": "0xb327709Ec4f0830722776746b1da42F98d51868e",
+      "deployTx": "0x5087de545224c2ae937fbc047bdcc61ef8c6a61a67733221a3cacd4abf1a6300",
+      "constructorArgs": {
+        "token": "0x534b2f3A21130d7a60830c2Df862319e593943A3"
+      }
+    }
+  },
+  "tokens": {
+    "originUSDC": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
+    "aUSDC": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+    "decimals": 6,
+    "usdcSource": "https://faucet.circle.com (Monad Testnet)"
+  },
+  "roles": {
+    "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+    "releaser": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E"
+  },
+  "note": "Same address as the Base deployment: identical deployer and nonce produce the same CREATE address on every EVM chain. Convenient for a multi-chain deployment, and not a coincidence to rely on if the nonce ever diverges."
+}

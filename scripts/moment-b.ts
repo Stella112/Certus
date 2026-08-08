@@ -96,7 +96,16 @@ if (!events.length) {
   console.error('   watcher never detected the revocation');
   process.exit(1);
 }
-console.log(`   froze intents: ${events[0].frozenIntents.join(', ')}`);
+// Print EVERY event. Printing only events[0] was misleading: a sweep covers all
+// counterparties with money at stake, so the run that matters can be second in the list.
+for (const e of events) {
+  console.log(`   ${e.address} -> ${e.signal}, froze: ${e.frozenIntents.join(', ') || 'none'}`);
+}
+const ours = events.find((e) => e.address.toLowerCase() === target.address.toLowerCase());
+if (!ours) {
+  console.error('   the watcher fired, but not for OUR supplier. Investigate before trusting this run.');
+  process.exit(1);
+}
 
 step(6, 'Verify the cascade, on chain and in the record');
 const leg2 = await readLeg(CHAIN, onChainId, 1n);

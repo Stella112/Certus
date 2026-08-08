@@ -70,6 +70,29 @@ atoken/launch approval latency. See API-TRUTH.md.
 
 ---
 
+## 2026-08-08 — Phase 1 findings
+
+**D7. Freeze-targets come from a PRE-MINTED POOL, never live minting.**
+`generate_apass` proved intermittent (see API-TRUTH.md reliability warning): one success then
+~10 consecutive `[CV_500]` failures over 30 min while reads stayed healthy. Since D6/F2 requires
+a fresh freeze-target per reset, and a demo cannot depend on a flaky write, the design is:
+  - `scripts/mint-pool.ts` mints freeze-target identities opportunistically whenever the
+    endpoint is up, and appends them to `data/identity-pool.json` (gitignored, holds no secrets
+    beyond throwaway test addresses).
+  - `scripts/seed.ts` CONSUMES an unused identity from the pool. It never calls generate_apass
+    on the demo path.
+  - If the pool is empty, seed fails LOUDLY with instructions, rather than silently producing
+    a demo that cannot perform Moment B.
+This also removes a live API write from the rehearsal path, which is better design regardless.
+
+**F5. Tier enforcement semantics unresolved**, blocked by the same outage. Check 3 evaluates
+tier locally (`query_apass.tier` vs `atoken/rules.min_tier`); its failing branch is covered by
+a unit-test double. Re-probe when writes recover. Note the falsified hypothesis: "only tier 50
+is valid" was disproven when tier 50 itself failed during the outage — a reminder to always
+run a control case before recording a constraint as truth.
+
+---
+
 ## Throwaway artifacts (not part of the product)
 
 - scripts/probe/* : Phase 0 probes. Scrappy by design. Superseded by src/lib/cleanverse in Phase 1.

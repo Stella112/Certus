@@ -1,0 +1,177 @@
+import { post } from './client';
+import type { Chain, EligibilityOutcome, QueryApassData, VerifyApassData } from './types';
+
+/**
+ * Identity (A-Pass = CVI) adapters.
+ * Every function here is traced to docs/API-TRUTH.md § Identity.
+ */
+
+/**
+ * SOURCE: API-TRUTH.md § POST /verify_apass — THE CORE CHECK
+ * VERIFIED: SANDBOX: confirmed 2026-08-08. code 4 (active identity), code 2 (address with
+ *           no A-Pass), code 1 (bogus A-Token) all observed live. code 3 proven unreachable.
+ * ENCRYPTED: NO (plain JSON)
+ * FALLBACK:  any non-'ok' envelope or transport failure yields UNAVAILABLE, which the
+ *            pipeline treats as not-eligible. Fail closed, always.
+ *
+ * THE FREEZE SIGNAL: a frozen A-Pass does NOT return data.code 3 (PART XI was wrong about
+ * this; see API-TRUTH.md). It returns envelope 0002 with "APassNotActive" in the message.
+ * That string is the revocation signal Moment B depends on.
+ */
+export async function verifyEligibility(args: {
+  chain: Chain;
+  atoken: string;
+  address: string;
+}): Promise<EligibilityOutcome> {
+  const res = await post<VerifyApassData>('/verify_apass', {
+    chain: args.chain,
+    atoken: args.atoken,
+    address: args.address,
+  });
+
+  if (res.kind === 'unavailable') {
+    return { signal: 'UNAVAILABLE', code: null, detail: `${res.reason}: ${res.detail}` };
+  }
+
+  if (res.kind === 'business') {
+    if (res.message.includes('APassNotActive')) {
+      return { signal: 'APASS_NOT_ACTIVE', code: null, detail: 'A-Pass frozen or revoked on chain' };
+    }
+    // Any other business error is an unrecognised state: treat as unavailable, not as pass.
+    return { signal: 'UNAVAILABLE', code: null, detail: `envelope ${res.code}: ${res.message}` };
+  }
+
+  const code = res.data?.code;
+  switch (code) {
+    case 4:
+      return { signal: 'ALLOWED', code: 4, detail: 'apass verify success' };
+    case 2:
+      return { signal: 'NO_APASS', code: 2, detail: 'apass not exist' };
+    case 1:
+      return { signal: 'ATOKEN_NOT_FOUND', code: 1, detail: 'atoken not exist' };
+    case 3:
+      // Documented as unreachable in this sandbox. Handled defensively: still not eligible.
+      return { signal: 'APASS_NOT_ACTIVE', code: 3, detail: 'apass expired or frozen (code 3)' };
+    default:
+      return { signal: 'UNAVAILABLE', code: code ?? null, detail: `unrecognised data.code: ${String(code)}` };
+  }
+}
+
+/**
+ * SOURCE: API-TRUTH.md § POST /query_apass
+ * VERIFIED: SANDBOX: confirmed 2026-08-08.
+ * ENCRYPTED: NO (plain JSON)
+ * FALLBACK:  null on any failure. Callers must treat null as "attributes unknown" and
+ *            fail the asset-rule check rather than assuming compliance.
+ *
+ * REQUEST FIELD IS `address`, NOT `walletAddress`. The response uses walletAddress; the
+ * request does not. Getting this wrong yields a Chinese "wallet address empty" error.
+ */
+export async function queryIdentity(args: {
+  chain: Chain;
+  address: string;
+}): Promise<QueryApassData | null> {
+  const res = await post<QueryApassData>('/query_apass', {
+    chain: args.chain,
+    address: args.address,
+  });
+  return res.kind === 'ok' ? res.data : null;
+}
+
+/**
+ * SOURCE: API-TRUTH.md § POST /query_apass_list
+ * VERIFIED: SANDBOX: confirmed 2026-08-08 (865 identities, paginated).
+ * ENCRYPTED: NO (plain JSON)
+ * FALLBACK:  empty array on failure. Callers must treat an empty list as "cannot enumerate",
+ *            never as "no identities exist".
+ */
+export interface IdentityListItem {
+  cvRecordId: string;
+  customerId: string;
+  chain: string;
+  walletAddress: string;
+  status: number | null;
+  tier: string;
+  countries: string[];
+  expirationTime: number;
+  registeredAt: string;
+}
+
+export async function listIdentities(args: {
+  page?: number;
+  pageSize?: number;
+}): Promise<IdentityListItem[]> {
+  const res = await post<{ items: IdentityListItem[] }>('/query_apass_list', {
+    pageNo: args.page ?? 1,
+    pageSize: args.pageSize ?? 20,
+  });
+  return res.kind === 'ok' ? (res.data?.items ?? []) : [];
+}
+
+/**
+ * SOURCE: API-TRUTH.md § POST /update_status
+ * VERIFIED: SANDBOX: FREEZE (status=2) confirmed working 2026-08-08, returns a txHash.
+ *           ACTIVATE (status=1) FAILS with [500] System Error in UAT — see DECISIONS.md D6.
+ * ENCRYPTED: YES (AES body)
+ * FALLBACK:  none needed for freeze. Reactivation is deliberately NOT exposed: it does not
+ *            work, and Certus must not imply an un-freeze path exists.
+ *
+ * This is the compliance officer's revoke control and the Moment B trigger.
+ */
+export async function freezeIdentity(args: {
+  chain: Chain;
+  address: string;
+  reason: string;
+}): Promise<{ ok: true; txHash: string } | { ok: false; detail: string }> {
+  const res = await post<{ txHash: string }>(
+    '/update_status',
+    { status: 2, wallet: { chain: args.chain, address: args.address }, blacklistReason: args.reason },
+    { encrypted: true }
+  );
+  if (res.kind === 'ok' && res.data?.txHash) return { ok: true, txHash: res.data.txHash };
+  const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
+  return { ok: false, detail };
+}
+
+/**
+ * SOURCE: API-TRUTH.md § POST /generate_apass
+ * VERIFIED: SANDBOX: one confirmed success 2026-08-08 (cvRecordId 1271, real txHash).
+ *           INTERMITTENT: ~10 consecutive [CV_500] failures followed, while reads stayed
+ *           healthy. See the reliability warning in API-TRUTH.md and DECISIONS.md D7.
+ * ENCRYPTED: YES (AES body)
+ * FALLBACK:  callers must tolerate failure. NOTHING on a demo or rehearsal path may call
+ *            this live — freeze-targets come from a pre-minted pool (scripts/mint-pool.ts).
+ *
+ * Constraints learned from errors: customerId must be >= 12 chars AND alphanumeric only
+ * (an underscore triggers a misleading "at least 12 characters" error); expirationTime
+ * must be comfortably in the future.
+ */
+export async function generateIdentity(args: {
+  chain: Chain;
+  address: string;
+  customerId: string;
+  expirationTime: number;
+  tier?: string;
+  countries?: string[];
+}): Promise<{ ok: true; cvRecordId: string; txHash?: string } | { ok: false; detail: string }> {
+  if (!/^[A-Za-z0-9]{12,}$/.test(args.customerId)) {
+    return { ok: false, detail: `customerId must be >=12 alphanumeric chars, got "${args.customerId}"` };
+  }
+  const res = await post<{ cvRecordId: string; wallet?: { txHash?: string } }>(
+    '/generate_apass',
+    {
+      wallet: { chain: args.chain, address: args.address },
+      customerId: args.customerId,
+      expirationTime: args.expirationTime,
+      tier: args.tier ?? '50',
+      subTier: 0,
+      group: '',
+      subGroup: '',
+      countries: args.countries ?? ['NG'],
+    },
+    { encrypted: true }
+  );
+  if (res.kind === 'ok') return { ok: true, cvRecordId: res.data.cvRecordId, txHash: res.data.wallet?.txHash };
+  const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
+  return { ok: false, detail };
+}

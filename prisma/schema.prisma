@@ -1,0 +1,71 @@
+// Certus audit store.
+// SQLite for the hackathon deployment; Postgres-ready via Prisma (swap the provider).
+// AuditEvent is APPEND-ONLY: there is no update or delete path in src/lib/audit/.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Intent {
+  id        String @id @default(cuid())
+  type      String // MILESTONE | BATCH | RECURRING | LINK
+  senderCvi String // sender wallet address (the A-Pass holder)
+  asset     String // A-Token address (aUSDC)
+  amount    String // base units as a decimal STRING. never a float.
+  status    String // DRAFT|ACTIVE|FROZEN|COMPLETED|REJECTED
+  policyId  String // PERMISSIVE | STANDARD | STRICT
+
+  legs      Leg[]
+  events    AuditEvent[]
+  createdAt DateTime @default(now())
+
+  @@index([senderCvi])
+  @@index([status])
+}
+
+model Leg {
+  id           String @id @default(cuid())
+  intentId     String
+  intent       Intent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  recipientCvi String
+  amount       String // base units, decimal STRING
+  sequence     Int
+  status       String // PENDING|RELEASED|ISOLATED|FROZEN|QUARANTINED
+
+  releasedAt DateTime?
+  txHash     String? // on-chain settlement hash, for explorer links + travel rule
+
+  @@index([intentId])
+  @@index([recipientCvi])
+  @@index([status])
+}
+
+/// APPEND-ONLY. The compliance record. Never updated, never deleted.
+/// Point-in-time export = replay events up to timestamp T.
+model AuditEvent {
+  id       String  @id @default(cuid())
+  intentId String?
+  intent   Intent? @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  legId    String?
+
+  eventType String // CHECK_RUN|RELEASE|FREEZE|ISOLATE|REVOCATION|YIELD_ACCRUAL
+  trigger   String? // INTENT_CREATE|MILESTONE_RELEASE|BATCH_ADDRESS|SUBSCRIPTION_EPOCH|LINK_OPEN|YIELD_TICK
+  verdict   String? // PASS|FAIL|ISOLATE|FREEZE
+  reasonCode String?
+
+  /// All four check outcomes, individually. JSON-encoded string (SQLite).
+  checkResults String
+  /// Arbitrary context for the event. JSON-encoded string (SQLite).
+  payload      String
+
+  occurredAt DateTime @default(now())
+
+  @@index([intentId])
+  @@index([occurredAt])
+  @@index([eventType])
+}

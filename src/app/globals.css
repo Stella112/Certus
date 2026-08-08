@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-paper text-ink antialiased;
+}
+
+/* Tabular numerals for every amount. Misaligned figures read as amateur. */
+.amount {
+  font-variant-numeric: tabular-nums;
+}

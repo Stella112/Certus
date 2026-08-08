@@ -81,10 +81,14 @@ All three of codes 4 / 2 / 1 are SANDBOX-CONFIRMED. Code-1 response (bogus atoke
 {"code":"0000","message":"ok","data":{"chain":"monad","atoken":"0x1111111111111111111111111111111111111111","address":"0x2e2B...d0cA","code":1,"message":"atoken not exist"}}
 ```
 
-**Code 3 is unreachable (three routes tested, all closed):**
-- frozen A-Pass => envelope `0002` + `APassNotActive` (NOT code 3)
-- register an already-expired pass => `[CV_504]The 'expirationTime' time has expired`
-- register a short-expiry (150s) pass => `[CV_500]CV System error`, identity never created
+**Code 3 was not observed. Two routes closed, one UNTESTED:**
+- frozen A-Pass => envelope `0002` + `APassNotActive` (NOT code 3). CONFIRMED.
+- register an already-expired pass => `[CV_504]The 'expirationTime' time has expired`. CONFIRMED.
+- natural expiry of a live pass => **UNTESTED.** A first attempt used a 150s expiry and got
+  `[CV_500]`, which was initially recorded here as "short expiries are rejected". **That was
+  wrong**: `[CV_500]` was the generate_apass outage documented below, not an expiry
+  constraint, and the follow-up probe was interrupted before completing. Corrected 2026-08-08.
+  Treat natural-expiry behaviour as unknown until a probe actually completes.
 Product impact: NONE. The pipeline uses an allowlist (eligible IFF `data.code === 4`), which is
 fail-closed for any unforeseen code. The spec's reason code `CVI_REVOKED_OR_EXPIRED` already
 merges revoked and expired, so no audit fidelity is lost. Phase 1 may freeze the enum.
@@ -135,7 +139,33 @@ Real success response:
 ```
 Registers a real on-chain A-Pass (txHash). Note `depositUSDCWallet`/`depositUSDTWallet`:
 the per-identity deposit route that mints the A-Token to the holder (relevant to release path).
-Seed script uses this to mint identities.
+
+**Validation constraints (learned from errors):**
+- `customerId`: min 12 chars AND alphanumeric. An underscore produces the *misleading*
+  error "must be at least 12 characters long" on a 25-char id. Use `[A-Za-z0-9]+` only.
+- `expirationTime`: must be in the future (`[CV_504]` if past) and not too near-future
+  (a 150s horizon produced `[CV_500]`).
+
+**>>> RELIABILITY WARNING — generate_apass is INTERMITTENT <<<**
+Observed 2026-08-08: one success at 01:29, then `[CV_500]CV System error` on ~10 consecutive
+attempts over the following 30 minutes, including a byte-identical replay of the successful
+payload. During the same window READS were fully healthy (`verify_apass` -> 4,
+`query_apass_list` -> 0000). Diagnosis: the write path is rate-limited or degraded server-side;
+it is NOT a payload, tier, or auth problem.
+- No partial writes: after `[CV_500]` the address has no A-Pass (`query_apass` -> not found),
+  so failures are clean and retry-safe.
+- **BINDING DESIGN CONSEQUENCE:** nothing in a demo or rehearsal path may depend on calling
+  `generate_apass` live. Freeze-targets must be **pre-minted into a pool** while the endpoint
+  is available, and the seed script consumes from that pool. See DECISIONS.md D7.
+
+### Tier semantics — UNRESOLVED (blocked by the write outage)
+aUSDC has `min_tier: 5`. Whether `verify_apass` independently enforces tier could not be
+tested, because minting a below-min-tier identity requires `generate_apass`, which is down.
+Only tier `50` has ever been successfully minted (once). **Do not conclude that tier 50 is the
+only valid tier** — that hypothesis was tested and falsified when tier 50 also failed during
+the outage. Check 3 therefore evaluates tier locally (`query_apass.tier` vs
+`atoken/rules.min_tier`) and its failing branch is covered by a unit test double, not a live
+case. Re-probe when the write path recovers.
 
 ### POST /update_status  (AES) — PARTIALLY CONFIRMED
 FREEZE (status=2): CONFIRMED WORKING.

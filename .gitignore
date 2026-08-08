@@ -28,3 +28,5 @@ Thumbs.db
 
 # Probe scratch output (raw responses may contain identifiers; keep local)
 scripts/probe/out/
+data/
+*.tsbuildinfo

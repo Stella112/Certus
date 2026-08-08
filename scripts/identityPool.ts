@@ -16,6 +16,12 @@ export interface PoolEntry {
   address: string;
   customerId: string;
   cvRecordId: string;
+  /**
+   * Chain the A-Pass was registered on. A-Passes are per (chain, address), so an entry
+   * minted on one chain is useless on another. Entries written before the Monad -> Base
+   * move (D11) have no chain field and are treated as 'monad'.
+   */
+  chain?: string;
   mintedAt: string;
   /** set when a seed run has burned this identity as its freeze target */
   consumedAt?: string;
@@ -42,14 +48,20 @@ export function appendToPool(entry: PoolEntry): void {
   writePool([...readPool(), entry]);
 }
 
-export function availableCount(): number {
-  return readPool().filter((e) => !e.consumedAt).length;
+const chainOf = (e: PoolEntry) => e.chain ?? 'monad';
+
+export function availableCount(chain: string): number {
+  return readPool().filter((e) => !e.consumedAt && chainOf(e) === chain).length;
 }
 
-/** Take the oldest unconsumed identity. Deterministic: always the earliest minted. */
-export function consumeFromPool(consumer: string): PoolEntry | null {
+/**
+ * Take the oldest unconsumed identity ON THIS CHAIN. Deterministic: always the earliest
+ * minted. Chain filtering matters: consuming a Monad entry while settling on Base would
+ * hand the demo a freeze target that does not exist on the settlement chain.
+ */
+export function consumeFromPool(consumer: string, chain: string): PoolEntry | null {
   const pool = readPool();
-  const idx = pool.findIndex((e) => !e.consumedAt);
+  const idx = pool.findIndex((e) => !e.consumedAt && chainOf(e) === chain);
   if (idx === -1) return null;
   pool[idx] = { ...pool[idx], consumedAt: new Date().toISOString(), consumedBy: consumer };
   writePool(pool);

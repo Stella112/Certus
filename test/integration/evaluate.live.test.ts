@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { evaluate } from '../../src/lib/pipeline/evaluate';
 import { ReasonCode } from '../../src/lib/pipeline/reasonCodes';
-import { MONAD_ASSETS } from '../../src/lib/cleanverse/cva';
+import { assets } from '../../src/lib/cleanverse/cva';
 import type { EvaluationContext } from '../../src/lib/pipeline/types';
 
 /**
@@ -10,15 +12,41 @@ import type { EvaluationContext } from '../../src/lib/pipeline/types';
  *
  * Fixtures are real, verified addresses recorded in docs/API-TRUTH.md:
  */
-const ACTIVE = '0x2e2BA14F6784B72fE9874b41811193B5B0bdd0cA'; // tier 50, status 1, verify -> 4
-const FROZEN = '0x820350D47277784A26FF4D4cE08C12CAD6F19094'; // frozen in Phase 0, unrecoverable
-const NO_APASS = '0x00000000000000000000000000000000DeaDBeeF'; // never had an A-Pass -> code 2
-const BOGUS_ATOKEN = '0x1111111111111111111111111111111111111111'; // -> code 1
+const ASSETS = assets();
+const CHAIN = ASSETS.chain;
+
+/**
+ * Fixtures are CHAIN SCOPED and generated, not hardcoded.
+ *
+ * They used to be pinned Monad addresses, which silently broke every case when settlement
+ * moved to Base Sepolia: A-Passes are per (chain, address), so those identities simply did
+ * not exist on the new chain and everything collapsed to NO_CVI. Regenerate with:
+ *   npx tsx --env-file=.env scripts/make-fixtures.ts
+ */
+const fixturesPath = path.resolve(process.cwd(), 'data', 'test-fixtures.json');
+if (!fs.existsSync(fixturesPath)) {
+  throw new Error('data/test-fixtures.json missing. Run: npx tsx --env-file=.env scripts/make-fixtures.ts');
+}
+const FIX = JSON.parse(fs.readFileSync(fixturesPath, 'utf8')) as {
+  chain: string;
+  active: string;
+  frozen: string;
+  noApass: string;
+  bogusAToken: string;
+};
+if (FIX.chain !== CHAIN) {
+  throw new Error(`Fixtures were built for "${FIX.chain}" but the configured chain is "${CHAIN}". Regenerate them.`);
+}
+
+const ACTIVE = FIX.active; // verified treasury, verify -> 4
+const FROZEN = FIX.frozen; // purpose-built, frozen, unrecoverable -> APassNotActive
+const NO_APASS = FIX.noApass; // never held an A-Pass -> code 2
+const BOGUS_ATOKEN = FIX.bogusAToken; // -> code 1
 
 const base = (over: Partial<EvaluationContext> = {}): EvaluationContext => ({
   trigger: 'INTENT_CREATE',
-  chain: 'monad',
-  atoken: MONAD_ASSETS.aToken,
+  chain: CHAIN,
+  atoken: ASSETS.aToken,
   senderAddress: ACTIVE,
   recipientAddress: ACTIVE,
   amount: 1_000_000n, // 1.000000 aUSDC (6 decimals)

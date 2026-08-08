@@ -1,0 +1,24 @@
+{
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "explorer": "https://sepolia.basescan.org",
+  "deployedAt": "2026-08-08T12:05:00Z",
+  "contracts": {
+    "CertusEscrow": {
+      "address": "0xb327709Ec4f0830722776746b1da42F98d51868e",
+      "deployTx": "0x8ad0f71026967f921bd8ae657948f327c5858ecbb2f36ffd831c2a072e1f6464",
+      "constructorArgs": {
+        "token": "0x543b96420d072BF587B63C41C0B0922762E986Ce"
+      }
+    }
+  },
+  "tokens": {
+    "originUSDC": "0x543b96420d072BF587B63C41C0B0922762E986Ce",
+    "aUSDC": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+    "decimals": 6
+  },
+  "roles": {
+    "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+    "releaser": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E"
+  }
+}

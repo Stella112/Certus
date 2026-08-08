@@ -118,6 +118,55 @@ logged and ignored. Pinned by `test/unit/evaluate.resilience.test.ts`.
 
 ---
 
+## 2026-08-08 — SCOPE DEVIATION: settlement chain Monad -> Base Sepolia
+
+**D11. The demo deploys on Base Sepolia (chainId 84532), not Monad.**
+
+The build spec pinned Monad and asserted "Monad is the chain sponsor". That premise was
+wrong. The actual hackathon announcement (Cleanverse Build: Trusted Assets, 48h sprint
+Aug 8-9) names **Cleanverse** as host and permits Ethereum, Arbitrum, Polygon, Avalanche,
+BNB Chain, **or** Monad. Chain choice therefore carries no sponsor-alignment cost.
+
+Forcing evidence, all verified live:
+- Monad USDC faucet reservoir is EMPTY: `ERC20: transfer amount exceeds balance` on the
+  source. Not a rate limit, not a parameter error.
+- Origin USDC on Monad is Circle FiatToken; `mint()` reverts `caller is not a minter`.
+- Base faucet DISPENSED on the first call: tx
+  `0xcc76b7ce3f3ff3d6ba6598e462b1d213abb1afb924910e18f3d5b028b4454ca5`,
+  block 45210224, and the treasury now holds 1.000000 USDC on chain.
+- Cleanverse "base" resolves to **Base Sepolia, chainId 84532** (tx present there, absent on
+  Base mainnet 8453).
+
+Why this is the right call rather than the convenient one: the alternative was deploying a
+second mock token, which would have broken the single-mock rule (D4) AND cost two real
+claims, settlement landing as a verified aUSDC asset and the bank-presentable travel-rule
+PDF. Moving chain preserves both. Base is also visibly Cleanverse's primary sandbox: it
+carries dozens of A-Token pairs versus Monad's one.
+
+Base Sepolia parameters (live-verified):
+```
+chainId  : 84532
+RPC      : https://base-sepolia-rpc.publicnode.com  (fallback https://base-sepolia.drpc.org)
+           NOTE: https://sepolia.base.org was unreachable from this environment
+explorer : https://sepolia.basescan.org
+origin   : usdc  0x543b96420d072BF587B63C41C0B0922762E986Ce (6 dp)
+atoken   : ausdc 0xaC0893567D43C3E7e6e35a72803df05416C1f20D (6 dp)
+accesscore: 0x8F118338a1fa41E7Fa86Be19A4e8B99Ed58A6EcC
+apass reg : 0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9
+```
+
+**Migration cost, accepted:** A-Passes are registered per (chain, address), so the identity
+pool and seed identities must be re-minted on `base`. `generate_apass` works, so this is
+mechanical. The Monad work is not wasted: every pipeline fact (verify codes, the
+APassNotActive freeze signal, rules shape, AES, concurrency behaviour) is chain-independent
+and already proven.
+
+**Open blocker:** the treasury holds 0 native ETH on Base Sepolia, so nothing can deploy
+yet. Base Sepolia gas requires a browser faucet with a captcha, which the agent must not
+attempt. The user funds it.
+
+---
+
 ## Throwaway artifacts (not part of the product)
 
 - scripts/probe/* : Phase 0 probes. Scrappy by design. Superseded by src/lib/cleanverse in Phase 1.

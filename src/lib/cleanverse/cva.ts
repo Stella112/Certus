@@ -1,4 +1,5 @@
 import { post } from './client';
+import { chainConfig } from '../chain/config';
 import { ATokenRulesSchema, parseOrNull } from './schemas';
 import type { ATokenRule, Chain } from './types';
 
@@ -6,16 +7,26 @@ import type { ATokenRule, Chain } from './types';
  * Assets (A-Token = CVA) adapters. Traced to docs/API-TRUTH.md § Assets.
  */
 
-/** The pre-issued Monad CVA pair. Confirmed via query_deposit_atoken_list 2026-08-08. */
-export const MONAD_ASSETS = {
-  chain: 'monad' as Chain,
-  originToken: '0x534b2f3A21130d7a60830c2Df862319e593943A3',
-  aToken: '0xaC0893567D43C3E7e6e35a72803df05416C1f20D',
+/**
+ * The active CVA pair, read from the single typed chain config rather than hardcoded.
+ * Now Base Sepolia (DECISIONS.md D11); was Monad until its faucet reservoir proved empty.
+ * Confirmed via query_deposit_atoken_list 2026-08-08.
+ */
+export function assets() {
+  const c = chainConfig();
+  return {
+    chain: c.cleanverseChain as Chain,
+    originToken: c.originToken,
+    aToken: c.aToken,
+    decimals: c.decimals,
+    symbol: 'aUSDC',
+  } as const;
+}
+
+/** Shared across chains in this sandbox; not chain-specific, so kept as constants. */
+export const CLEANVERSE_INFRA = {
   accessCore: '0x8F118338a1fa41E7Fa86Be19A4e8B99Ed58A6EcC',
   apassRegistry: '0xbA82D189540CaC9DC6FF46B6837CaC1BFdEC58B9',
-  /** BOTH tokens are 6 decimals on Monad. NOT 18. Getting this wrong is a 10^12 error. */
-  decimals: 6,
-  symbol: 'aUSDC',
 } as const;
 
 /**
@@ -47,7 +58,7 @@ export async function getAssetRules(args: {
  * SOURCE: API-TRUTH.md § POST /query_deposit_atoken_list
  * VERIFIED: SANDBOX: confirmed 2026-08-08.
  * ENCRYPTED: NO (plain JSON)
- * FALLBACK:  null on failure; callers fall back to the pinned MONAD_ASSETS constants above,
+ * FALLBACK:  null on failure; callers fall back to the pinned assets() config,
  *            which were themselves read from this endpoint.
  */
 export async function listDepositAssets(chain: Chain) {

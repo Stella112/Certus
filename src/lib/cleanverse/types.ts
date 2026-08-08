@@ -3,7 +3,12 @@
  * If a field is not in API-TRUTH.md, it does not belong here.
  */
 
-export type Chain = 'monad';
+/**
+ * Chains Cleanverse exposes an A-Token pair on, as confirmed by query_deposit_atoken_list
+ * (2026-08-08). Certus settles on `base` (Base Sepolia) per DECISIONS.md D11.
+ * Solana is listed by the API but excluded here: the stack is EVM only.
+ */
+export type Chain = 'base' | 'monad' | 'ethereum' | 'polygon' | 'bsc';
 
 /** Envelope observed on every Cooperate endpoint. */
 export type EnvelopeCode = '0000' | '0001' | '0002' | string;

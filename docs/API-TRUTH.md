@@ -140,6 +140,17 @@ Real success response:
 Registers a real on-chain A-Pass (txHash). Note `depositUSDCWallet`/`depositUSDTWallet`:
 the per-identity deposit route that mints the A-Token to the holder (relevant to release path).
 
+**>>> REGISTRATION IS ASYNCHRONOUS <<<**
+`generate_apass` returns `code:"0000"` with a `txHash` immediately, but `verify_apass` keeps
+returning `2` (apass not exist) until that on-chain registration confirms. Observed
+2026-08-08 on Base Sepolia: an immediate re-verify said `NO_APASS`, while the same addresses
+returned `4` moments later. **Never trust a single verify straight after registering** —
+poll. A script that checks once reports a false negative and can abort a perfectly good run.
+
+**A-Passes are scoped to (chain, address).** The same wallet registered on two chains keeps
+one `cvRecordId` but needs a registration per chain. Migrating settlement chains therefore
+means re-minting the identity pool, which is mechanical but not free.
+
 **Validation constraints (learned from errors):**
 - `customerId`: min 12 chars AND alphanumeric. An underscore produces the *misleading*
   error "must be at least 12 characters long" on a 25-char id. Use `[A-Za-z0-9]+` only.
@@ -247,10 +258,79 @@ Testnet reset from genesis 2025-12-16, version v0.15.2. Cleanverse chain value: 
   (needs a real settlement txHash). DOC-ONLY until Phase 2.
 - POST /query_txs, POST /query_institution_txs -> indexed history for dashboard. DOC-ONLY.
 
-## Faucet (to use in Phase 0 funding, deliberately, once)
+## Faucet — CALLED 2026-08-08, RESERVOIR IS EMPTY (blocks Phase 2 on-chain work)
 
-- POST /faucet { chain, symbol, depositAddress, amount }. Rate-limited per api-id, error
-  returns seconds to wait (example in docs ~86,396s ≈ 24h). NOT yet called.
+Required fields, learned from validation errors WITHOUT consuming the rate limit:
+`Chain`, `Symbol`, `DepositAddress`. **`Amount` is NOT required** — the faucet dispenses a
+fixed amount, so there was no units ambiguity to get wrong.
+
+Single call made: `{ chain:'monad', symbol:'usdc', depositAddress:<treasury> }` returned:
+```json
+{"code":"0002","message":"InstitutionFaucet failed: failed to transfer token: failed to execute token transfer: execution reverted: ERC20: transfer amount exceeds balance","data":"{}"}
+```
+This is **NOT a rate limit.** The revert is on the SOURCE balance, i.e. Cleanverse's own
+Monad USDC faucet reservoir holds no tokens. Because nothing was dispensed, the ~24h limit
+was probably NOT consumed. Retry once the reservoir is refilled.
+
+### On-chain facts established while diagnosing (all via `cast`, Monad testnet)
+
+| Fact | Value |
+|---|---|
+| origin USDC `0x534b…43A3` | real contract, `symbol()="USDC"`, `decimals()=6`, totalSupply 9.227e15 |
+| aUSDC `0xaC08…f20D` | real contract, `symbol()="aUSDC"`, `decimals()=6` |
+| origin USDC implementation | Circle **FiatToken**. `mint()` exists but reverts `FiatToken: caller is not a minter` |
+| EIP-1967 impl slot | zero, so not a standard transparent proxy |
+| token `owner()` | `0x7A154EA9156D354504ad9A401380AA548039BE8b`, holds 0 USDC |
+| treasury/deployer USDC + aUSDC | 0 and 0 |
+| per-identity deposit wallets | **CONFIRMED PER-IDENTITY**: two fresh identities got `0xCff3e967…7952` and `0xA4DF6B41…6d31`. Not shared |
+
+### CONSEQUENCE: no obtainable origin USDC
+
+Three avenues exhausted: faucet reservoir empty, `mint()` permissioned, and guessed
+`/ramp/*` paths all 404. The ramp result is weak evidence: the paths were GUESSED, so this
+shows only that the real paths are unknown to us, not that no ramp exists. Escalated to the
+user rather than silently substituting a token, per D4 (single-mock rule).
+
+## Escrow custody + release — TESTED ON CHAIN 2026-08-08 (Base Sepolia)
+
+`CertusEscrow` deployed at `0xb327709Ec4f0830722776746b1da42F98d51868e`.
+Live run against the real contract and the real sandbox:
+
+| Claim | Result |
+|---|---|
+| A plain contract can custody the ungated origin USDC | **PROVEN.** Escrow held 200000 base units. Closes Phase 0 F-05(i), previously an inference |
+| A release moves real value on chain | **PROVEN.** tx `0xe97f0ebe…e427`, escrow 200000 -> 100000 |
+| Freeze halts the remaining milestone on chain | **PROVEN.** tx `0x307cc13a…435b`, leg 1 = Frozen, `quarantinedOf` = 100000 |
+| Quarantined funds stay put, not refunded | **PROVEN.** Escrow still holds 100000 after freeze |
+| Value lands AS a verified asset (aUSDC) | **NOT PROVEN — see below** |
+
+### The deposit route does NOT wrap into aUSDC (corrects an earlier assumption)
+
+We released into the recipient's per-identity `depositUSDCWallet` expecting it to mint aUSDC.
+Observed instead, ~30s later:
+```
+deposit route 0xF670e23c… USDC : 0        (swept)
+recipient     0x985b4D07… USDC : 100000   (forwarded as ORIGIN token)
+recipient     0x985b4D07… aUSDC: 0        (no A-Token minted)
+aUSDC totalSupply              : 1012719611006  (minting clearly happens for someone)
+```
+So the deposit wallet behaves as a **sweep/forward to the identity's own address in the origin
+token**, not as a wrap. aUSDC minting exists in the system but is not triggered by simply
+sending origin USDC to that address; some additional step we have not identified is required.
+
+**Honest consequence for the product claim.** What is true and demonstrated: no value moves
+until all four checks pass, every counterparty holds a verified identity, and a revoked
+credential freezes the remaining milestones on chain. What we may NOT currently claim:
+that settlement is denominated in the compliance-enforcing A-Token. Until the wrap step is
+found, say "settlement to verified counterparties", not "settlement in verified assets".
+
+## Release mechanism (AC-2.0) — superseded by the on-chain test above
+
+Because deposit wallets are PER-IDENTITY, the intended settlement path is viable: escrow
+holds ungated origin USDC and, on a PASS verdict, transfers to the recipient's own
+`depositUSDCWallet`, crediting that recipient with compliance-enforcing aUSDC. Value
+therefore lands AS a verified asset. **Not yet proven end to end**, because we hold no origin
+USDC to send. This is the one piece of evidence Phase 2 still owes.
 
 ---
 

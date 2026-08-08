@@ -1,5 +1,6 @@
 import type { ReasonCode } from './reasonCodes';
 import type { PolicyId } from './policies';
+import type { Chain } from '../cleanverse/types';
 
 /** Why the pipeline is running. The verdict depends on reason AND trigger. */
 export type Trigger =
@@ -24,7 +25,7 @@ export interface CheckResult {
 
 export interface EvaluationContext {
   trigger: Trigger;
-  chain: 'monad';
+  chain: Chain;
   /** A-Token address the payment settles in. */
   atoken: string;
   senderAddress: string;

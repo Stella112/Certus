@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { prisma } from '../src/lib/db';
 import { listIdentities, verifyEligibility } from '../src/lib/cleanverse/cvi';
-import { MONAD_ASSETS } from '../src/lib/cleanverse/cva';
+import { assets } from '../src/lib/cleanverse/cva';
 import { consumeFromPool, availableCount } from './identityPool';
 
 /**
@@ -18,13 +18,16 @@ import { consumeFromPool, availableCount } from './identityPool';
  *    we freeze, and freezing is irreversible in UAT (DECISIONS.md D6/D7).
  */
 
+const ASSETS = assets();
+const CHAIN = ASSETS.chain;
+
 const UNVERIFIED_RECIPIENT = '0x00000000000000000000000000000000DeaDBeeF'; // verify -> code 2
 const USDC = (whole: number) => (BigInt(whole) * 1_000_000n).toString(); // 6 decimals, as string
 
 console.log('Seeding Certus demo state...\n');
 
 // --- 1. Discover clean, currently-verified recipients -------------------------------
-console.log('Discovering verified Monad identities from the sandbox...');
+console.log(`Discovering verified identities on ${CHAIN} from the sandbox...`);
 const listed = await listIdentities({ page: 1, pageSize: 100 });
 /**
  * Padded addresses like 0x0000...00bb are real sandbox identities but read as test
@@ -33,8 +36,8 @@ const listed = await listIdentities({ page: 1, pageSize: 100 });
  */
 const looksSynthetic = (a: string) => /0{8,}/.test(a.slice(2));
 
-const monadCandidates = listed
-  .filter((i) => i.chain?.toLowerCase() === 'monad' && i.walletAddress)
+const chainCandidates = listed
+  .filter((i) => i.chain?.toLowerCase() === CHAIN && i.walletAddress)
   .map((i) => i.walletAddress)
   .filter((a, idx, arr) => arr.indexOf(a) === idx)
   .sort() // deterministic base ordering
@@ -44,13 +47,13 @@ const monadCandidates = listed
 // recipient list (Phase 1 audit F1-04), or the batch demo shows a payment from an address
 // to itself, which is wrong on a projector and wrong for the budget calculation.
 const verifiedAll: string[] = [];
-for (const address of monadCandidates) {
+for (const address of chainCandidates) {
   if (verifiedAll.length >= 11) break;
-  const outcome = await verifyEligibility({ chain: 'monad', atoken: MONAD_ASSETS.aToken, address });
+  const outcome = await verifyEligibility({ chain: CHAIN, atoken: ASSETS.aToken, address });
   if (outcome.signal === 'ALLOWED') verifiedAll.push(address);
 }
 const verified = verifiedAll.slice(1); // recipients, sender excluded
-console.log(`  found ${verifiedAll.length} verified identities (of ${monadCandidates.length} Monad candidates)`);
+console.log(`  found ${verifiedAll.length} verified identities (of ${chainCandidates.length} candidates)`);
 console.log(`  1 sender + ${verified.length} clean recipients, sender excluded from recipients`);
 
 if (verifiedAll.length < 3) {
@@ -62,7 +65,7 @@ if (verifiedAll.length < 3) {
 }
 
 // --- 2. Claim a freeze target from the pre-minted pool ------------------------------
-const freezeTarget = consumeFromPool('seed');
+const freezeTarget = consumeFromPool('seed', CHAIN);
 if (!freezeTarget) {
   console.error(
     '\nFATAL: the freeze-target pool is empty.\n' +
@@ -88,7 +91,7 @@ const milestone = await prisma.intent.create({
     id: 'intent-milestone-001',
     type: 'MILESTONE',
     senderCvi: SENDER_ACME,
-    asset: MONAD_ASSETS.aToken,
+    asset: ASSETS.aToken,
     amount: USDC(30_000),
     status: 'ACTIVE',
     policyId: 'STANDARD',
@@ -108,7 +111,7 @@ const recurring = await prisma.intent.create({
     id: 'intent-recurring-001',
     type: 'RECURRING',
     senderCvi: SENDER_ACME,
-    asset: MONAD_ASSETS.aToken,
+    asset: ASSETS.aToken,
     amount: USDC(2_000),
     status: 'ACTIVE',
     policyId: 'STANDARD',
@@ -147,8 +150,8 @@ for (let i = 0; i < 20; i++) {
 // --- 4. Manifest the demo will read --------------------------------------------------
 const manifest = {
   generatedAt: new Date().toISOString(),
-  chain: 'monad',
-  asset: MONAD_ASSETS,
+  chain: CHAIN,
+  asset: ASSETS,
   sender: SENDER_ACME,
   cleanRecipients: verified,
   unverifiedRecipient: UNVERIFIED_RECIPIENT,
@@ -169,6 +172,6 @@ console.log(`  clean recipients  : ${verified.length}`);
 console.log(`  unverified (red)  : ${UNVERIFIED_RECIPIENT}`);
 console.log(`  freeze target     : ${freezeTarget.address}`);
 console.log(`  intents           : 2 mid-lifecycle, 20 historical audit events`);
-console.log(`  pool remaining    : ${availableCount()} freeze targets`);
+console.log(`  pool remaining    : ${availableCount(CHAIN)} freeze targets`);
 
 await prisma.$disconnect();

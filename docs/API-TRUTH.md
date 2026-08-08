@@ -345,9 +345,66 @@ body form). Issuance completed in seconds, not the long approval wait PART XI wa
 All four pipeline checks work against an asset Certus issues and governs. Note it does NOT
 appear in `query_deposit_atoken_list`, which lists deposit-wrappable pairs only.
 
-Still open: how holders receive cvUSD (`add_whitelist_for_institutional` needs `address_list`;
-a mint/distribute path is not yet identified). Until that is proven, do not claim escrow
-releases settle in cvUSD.
+### Wrapped CVA route — MAPPED, then blocked by an existing pairing
+
+Cleanverse support gave the intended path: `/atoken/launch_wrapped_atoken` -> authorize Mint
+-> `add_whitelist_for_institutional` -> transfers from the whitelisted address to a deposit
+address auto-wrap.
+
+The endpoint is real and its schema is now known (discovered field by field, not guessed):
+```jsonc
+{
+  "chain": "monad", "admin_address": "0x…", "rule": { … },
+  "decimals": 6, "icon": "<url>",
+  "token_name": "Certus Wrapped USDC", "token_symbol": "cwUSDC",
+  "origin_token_address": "0x534b…43A3",   // NOT "origin_token"
+  "origin_token_icon": "<url>"
+}
+```
+Accepted: `{"todo":true,"requestId":"WA20260808211834800297","wrappedIssueAssetId":103}`
+
+**Then issuance FAILED, and the reason is structural:**
+```json
+{"applyStatus":"ISSUE_FAILED",
+ "issueErrorMsg":"LaunchWrappedAToken failed: origin token USDC (0x534b…43a3) is already paired"}
+```
+
+An origin token can be wrapped **once**. USDC on Monad is already paired, and its wrapper is
+aUSDC, whose whitelist we cannot join. So both routes to A-Token settlement are closed to us
+for USDC specifically:
+- cannot whitelist on aUSDC (third parties may not add themselves)
+- cannot wrap USDC ourselves (already paired)
+
+This is not a gap in our implementation and no further probing will move it. The remaining
+options are (a) Cleanverse adds our escrow to the aUSDC institutional whitelist on our behalf,
+or (b) we wrap a different, unpaired origin token, which on Monad we do not have and would
+have to deploy, i.e. a second mock and a D4 escalation.
+
+`cvUSD` (self-issued, non-wrapped) remains live and all four checks pass against it, so it is
+still a real demonstration that Certus can define and enforce rules on its own asset. What it
+cannot yet do is receive value from escrow.
+
+### add_whitelist_for_institutional — partially mapped, then STOPPED
+
+Probed until it turned into guesswork, then stopped rather than invent a field name.
+What the server itself confirmed:
+
+| Probe | Server response | Conclusion |
+|---|---|---|
+| `{}` | `address_list is required` | `address_list` is the only required top-level field |
+| `{chain, address_list:[...]}` | `Unknown field(s): chain` | there is NO top-level `chain` |
+| `{address_list:["0x…"]}` | `expect ':' but 93 (']')` | entries are OBJECTS, not strings |
+| `{address_list:[{chain, address}]}` | `Unknown field(s): address` | `chain` IS valid inside an entry; `address` is not |
+| 7 further name guesses | all `Unknown field(s)` | `institutional_address`, `institution_address`, `wallet_address`, `wallet`, `deposit_address`, `account`, `user_address` are all wrong |
+
+So the shape is `{ address_list: [ { chain: "...", <UNKNOWN_ADDRESS_FIELD>: "0x…" } ] }` and
+only the address field name is missing. Escalated to Cleanverse rather than guessed further.
+
+No mint/issue endpoint found: `/atoken/mint`, `/atoken/issue` both 404 (names were guesses,
+so this is weak evidence of absence).
+
+**Until the address field is known, do not claim escrow releases settle in cvUSD.** The
+demonstrated claim remains "settlement to verified counterparties".
 
 ### WHY the aUSDC wrap fails, and why chain-hopping was the wrong fix
 
@@ -424,3 +481,67 @@ USDC to send. This is the one piece of evidence Phase 2 still owes.
 4. **Escrow custody is currently an INFERENCE, not a live transfer test** (Phase 0 audit F-05).
    Phase 2 must directly prove: (i) CertusEscrow holds origin USDC, (ii) aUSDC reaches a
    verified recipient on release. Do not treat design (c) as proven until then.
+
+---
+
+# CORRECTIONS FROM THE OFFICIAL API REFERENCE (v5.6), 2026-08-08
+
+The full reference resolved several things we had probed our way around, and exposed two
+real bugs in our own code. Recorded here because each changes behaviour.
+
+## 1. `update_status.status` is a STRING. Un-freeze is NOT broken.
+`"1"` activate, `"2"` freeze. We sent integers. The API tolerates integer `2` (so freeze
+always worked and masked the problem) but rejects integer `1` with `[500] System Error`.
+Verified fix: reactivated the Phase 0 identity, txHash `0xf31673e2…8dfc`, verify -> 4.
+**Supersedes the "reactivation is impossible in UAT" claim everywhere it appears above.**
+
+## 2. `min_tier` is STRICTLY GREATER THAN
+> "A user is allowed if the user's A-Pass tier is greater than this value."
+
+We used `tier < min_tier` as the failure condition, so a counterparty whose tier exactly
+equalled the minimum PASSED our check while the A-Token contract would refuse the transfer.
+A green check for a transfer the chain rejects is the worst failure mode this product can
+have. Fixed to `tier <= min_tier`, with `0` meaning no restriction.
+
+## 3. `countries` is NOT a generate_apass field
+Country tags are derived from `identityDataList[].issuingCountryISO2` (ISO 3166-1 alpha-2,
+uppercased, deduplicated). Our seed passed a top-level `countries: ['NG']`, which was
+silently ignored: `query_apass` returned `countries: []`. To demo country-based compliance
+we must send identity documents, not a countries array.
+
+## 4. `add_whitelist_for_institutional` — the shape we could not guess
+It is institution metadata plus a per-chain address list, and the field we hunted for is
+`walletAddresses`:
+```jsonc
+{ "entityName":"…", "serviceName":"…", "category":"Exchange", "license":"…",
+  "logoUrl":"https://…",
+  "addressList":[ { "chain":"monad", "symbol":"usdc",
+                    "assetAddress":"<ORIGIN token>", "walletAddresses":["0x…"] } ] }
+```
+Still gated on owning a Wrapped A-Token: "applies only to Wrapped A-Tokens that your
+institution has issued". Since USDC is already paired, that remains blocked for us.
+Companion endpoints exist: `remove_whitelist_for_institutional` (soft, is_active 0) and
+`restore_whitelist_for_institutional`. Duplicate adds return `12029`.
+
+## 5. Travel Rule reports only cover A-Token transfers — affects feature F4
+> "Transaction Report: provide the transfer transaction's hash … (only A-Token and Wrapped
+> A-Token transfers are supported)"
+
+Our escrow settles the ORIGIN token, so `download_travel_rule` will NOT produce a report for
+our settlement transactions. The payroll-provenance feature depends on A-Token settlement,
+which is currently blocked. Do not promise a bank-presentable PDF for escrow releases until
+that is resolved.
+
+## 6. Useful endpoints we had not used
+- `POST /query_deposit_address { chain, address }` returns a deposit wallet for ANY existing
+  identity. We had been minting a new identity just to read one out of generate_apass.
+- `POST /query_institution_white_list { chain }` shows which institutions are whitelisted per
+  token pair (e.g. Zero Hash on base aUSDC). Confirms the whitelist is institution-scoped.
+- `GET /atoken/list_my_atokens` lists our own issued assets.
+- A-Token apply supports `callback_url` webhooks (HMAC-SHA256 with the Base64-decoded
+  api-key), so issuance need not be polled.
+
+## 7. Wrapped A-Token post-issuance step we had not reached
+After ISSUED, the admin wallet must grant `MINTER_ROLE` on the wrapped token to the
+`access_core` contract (address from `query_deposit_atoken_list`). Only then does a deposit
+from a whitelisted address mint 1:1 to the user.

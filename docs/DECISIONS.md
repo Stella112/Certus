@@ -245,3 +245,35 @@ Its cross-chain contribution is the dual-registry check: an A-Pass is scoped to
 (chain, address), so a counterparty verified on one chain is NOT thereby verified on another,
 and a payment spanning chains must satisfy both registries. That is a compliance claim we can
 actually implement and defend. Building a bridge is out of scope for 48 hours.
+
+---
+
+## 2026-08-08 — D14: CORRECTION. Un-freeze works. D6/F2 were wrong, and it was our bug.
+
+**What we claimed:** `update_status status=1` returns `[500] System Error`, so a frozen
+A-Pass is unrecoverable in UAT. Recorded as D6/F2, reported to the user, and offered to
+Cleanverse as a bug report.
+
+**What is actually true:** the API reference specifies `status` as a **STRING** ("1"
+activate, "2" freeze). We sent the integer `1`. The API tolerates the integer `2` for freeze,
+which is why freezing always worked and hid the type error. Sending `"1"` reactivates
+correctly: txHash `0xf31673e2…8dfc`, and the identity frozen since Phase 0
+(`0x820350D4…9094`) went straight back to `verify_apass` code 4.
+
+**Why this matters more than a type fix.** A wrong reading of one failure propagated into
+three design decisions:
+- D6 declared quarantine terminal and told us never to imply an un-freeze path exists.
+- F2 made every seed mint a fresh freeze-target.
+- D7 built the pre-minted identity pool partly around that assumption.
+
+None of that was necessary. The lesson is specific: when an API returns a 500 rather than a
+validation error, suspect our own request shape before concluding the service is broken. We
+never checked the documented type of the one field we were changing.
+
+**Corrections now in force:**
+- `freezeIdentity` and `reactivateIdentity` both send `status` as a string.
+- Quarantine is NOT terminal. Funds can be released after reactivation and compliance review,
+  which is a materially better demo: freeze, review, release.
+- Freeze-target identities are REUSABLE. The pool still has value (it removes a live write
+  from the rehearsal path) but it is no longer burn-per-run.
+- The bug report to Cleanverse about un-freeze should be retracted. It was our error.

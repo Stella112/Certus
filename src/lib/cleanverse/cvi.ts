@@ -127,12 +127,17 @@ export async function listIdentities(args: {
 }
 
 /**
- * SOURCE: API-TRUTH.md § POST /update_status
- * VERIFIED: SANDBOX: FREEZE (status=2) confirmed working 2026-08-08, returns a txHash.
- *           ACTIVATE (status=1) FAILS with [500] System Error in UAT — see DECISIONS.md D6.
+ * SOURCE: API-TRUTH.md § POST /update_status (API reference v5.2)
+ * VERIFIED: SANDBOX: both directions confirmed working 2026-08-08.
  * ENCRYPTED: YES (AES body)
- * FALLBACK:  none needed for freeze. Reactivation is deliberately NOT exposed: it does not
- *            work, and Certus must not imply an un-freeze path exists.
+ * FALLBACK:  none. A failed freeze must surface, never be swallowed.
+ *
+ * `status` MUST be a STRING ("1" activate, "2" freeze).
+ * We originally sent the integer 2, which the API happens to accept for freeze, and the
+ * integer 1, which it does NOT accept for activate: it returned [500] System Error. That led
+ * us to record reactivation as broken in UAT and to design the whole freeze-target pool
+ * around a limitation that did not exist. It was a type bug on our side. Sending the
+ * documented string works in both directions. Keep these as strings.
  *
  * This is the compliance officer's revoke control and the Moment B trigger.
  */
@@ -143,13 +148,41 @@ export async function freezeIdentity(args: {
 }): Promise<{ ok: true; txHash: string } | { ok: false; detail: string }> {
   const res = await post<unknown>(
     '/update_status',
-    { status: 2, wallet: { chain: args.chain, address: args.address }, blacklistReason: args.reason },
+    { status: '2', wallet: { chain: args.chain, address: args.address }, blacklistReason: args.reason },
     { encrypted: true }
   );
   if (res.kind === 'ok') {
     const parsed = parseOrNull(TxHashSchema, res.data);
     if (parsed) return { ok: true, txHash: parsed.txHash };
     return { ok: false, detail: 'freeze returned success without a txHash, treat as unconfirmed' };
+  }
+  const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
+  return { ok: false, detail };
+}
+
+/**
+ * SOURCE: API-TRUTH.md § POST /update_status (API reference v5.2)
+ * VERIFIED: SANDBOX: confirmed 2026-08-08. Reactivated an identity that had been frozen
+ *           since Phase 0; verify_apass went from APassNotActive back to code 4.
+ * ENCRYPTED: YES (AES body)
+ * FALLBACK:  none. If reactivation fails the identity stays frozen, which is the safe state.
+ *
+ * Reactivation is what lets quarantined funds be released after a compliance review, and it
+ * makes freeze-target identities reusable across rehearsals instead of single-use.
+ */
+export async function reactivateIdentity(args: {
+  chain: Chain;
+  address: string;
+}): Promise<{ ok: true; txHash: string } | { ok: false; detail: string }> {
+  const res = await post<unknown>(
+    '/update_status',
+    { status: '1', wallet: { chain: args.chain, address: args.address } },
+    { encrypted: true }
+  );
+  if (res.kind === 'ok') {
+    const parsed = parseOrNull(TxHashSchema, res.data);
+    if (parsed) return { ok: true, txHash: parsed.txHash };
+    return { ok: false, detail: 'activate returned success without a txHash' };
   }
   const detail = res.kind === 'unavailable' ? `${res.reason}: ${res.detail}` : `envelope ${res.code}: ${res.message}`;
   return { ok: false, detail };

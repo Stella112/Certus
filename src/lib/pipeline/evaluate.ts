@@ -86,22 +86,31 @@ function evaluateRules(
 ): CheckResult {
   for (const rule of rules) {
     for (const { label, identity } of parties) {
+      /*
+       * STRICTLY GREATER THAN, not >=. The API reference is explicit: "A user is allowed if
+       * the user's A-Pass tier is greater than this value." We previously failed only when
+       * tier < min_tier, which let a counterparty whose tier EQUALS the minimum pass our
+       * check while the A-Token contract itself would refuse the transfer. That is the worst
+       * shape of bug for this product: our dashboard would show a green check for a transfer
+       * the chain then rejects. Same for subTier.
+       */
       const tier = Number(identity.tier);
-      if (Number.isFinite(tier) && tier < rule.min_tier) {
+      // A minimum of 0 means "no restriction" (API reference, Rule object).
+      if (Number.isFinite(tier) && rule.min_tier > 0 && tier <= rule.min_tier) {
         return {
           check: 'ASSET_RULES',
           passed: false,
           reason: ReasonCode.ASSET_RULE_TIER,
-          detail: `${label} tier ${identity.tier} is below the asset minimum of ${rule.min_tier}`,
+          detail: `${label} tier ${identity.tier} does not exceed the asset minimum of ${rule.min_tier}`,
           evidence: { rule, party: label, tier: identity.tier },
         };
       }
-      if (identity.subTier < rule.min_sub_tier) {
+      if (identity.subTier <= rule.min_sub_tier && rule.min_sub_tier > 0) {
         return {
           check: 'ASSET_RULES',
           passed: false,
           reason: ReasonCode.ASSET_RULE_TIER,
-          detail: `${label} sub tier ${identity.subTier} is below the asset minimum of ${rule.min_sub_tier}`,
+          detail: `${label} sub tier ${identity.subTier} does not exceed the asset minimum of ${rule.min_sub_tier}`,
           evidence: { rule, party: label, subTier: identity.subTier },
         };
       }

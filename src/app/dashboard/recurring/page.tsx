@@ -1,0 +1,5 @@
+import { PaymentComposer, type PaymentNetwork } from '@/app/components/PaymentComposer';
+import { chainConfig, deployment, listChains } from '@/lib/chain/config';
+import { selectedChain, type SearchParams } from '@/lib/chain/selection';
+function networks():PaymentNetwork[]{return listChains().map(key=>{const chain=chainConfig(key);const deployed=deployment(key);const ausdc={mode:'AUSDC' as const,label:deployed.escrowAssetSymbol??chain.symbol,aToken:deployed.escrowAsset??chain.aToken,escrow:deployed.escrow,verified:Boolean(deployed.escrow&&deployed.escrowAssetVerified)};return{key,label:chain.label,symbol:ausdc.label,aToken:ausdc.aToken,decimals:chain.decimals,chainId:chain.chainId,rpcUrl:chain.rpcUrl,nativeSymbol:chain.nativeSymbol,explorerUrl:chain.explorerUrl,escrow:ausdc.escrow,settlementReady:Boolean(ausdc.escrow&&ausdc.verified),assetOptions:[ausdc]}})}
+export default async function Recurring({searchParams}:{searchParams:SearchParams}){return <PaymentComposer mode="recurring" networks={networks()} initialChain={await selectedChain(searchParams)}/>}

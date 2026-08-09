@@ -1,4 +1,5 @@
 import { prisma } from '../src/lib/db';
+import { resetLocalStore } from './local-store-reset';
 
 /**
  * Wipe the local audit store back to empty. Does NOT touch Cleanverse: identities and
@@ -10,11 +11,7 @@ import { prisma } from '../src/lib/db';
  * operator reset between rehearsals is a different act, and it is the only one.
  */
 
-const counts = {
-  events: await prisma.auditEvent.deleteMany({}),
-  legs: await prisma.leg.deleteMany({}),
-  intents: await prisma.intent.deleteMany({}),
-};
+const counts = await resetLocalStore();
 
 console.log('Local audit store reset:');
 console.log(`  audit events deleted : ${counts.events.count}`);

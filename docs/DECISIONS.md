@@ -4,6 +4,43 @@ Every deviation and design decision, dated. Judges may ask; this is the paper tr
 
 ---
 
+## 2026-08-08 — D16: dedicated batch isolation, Phase 3 remains open
+
+The master spec explicitly requires `CertusBatch.sol`; reusing `CertusEscrow.freezeIntent`
+would freeze every residual row and cannot represent independent isolation. The dedicated
+contract therefore exposes terminal `releaseRow` and `isolateRow` actions. Isolated value
+has no exit path, while every other pending row remains independently processable.
+
+Every released row also produces a signed `certus.provenance.v1` EIP-712 artifact. This is
+the Certus-signed payroll attestation; the Cleanverse `download_travel_rule` PDF remains the
+separate official transaction report when that endpoint is available.
+
+Phase 3 is not declared complete until the live 9-green/1-red run produces nine artifacts.
+Cleanverse's current Monad pair inconsistency is recorded as an external blocker, not waived.
+
+---
+
+## 2026-08-08 — D15 supersedes D1: active escrow custodies aUSDC
+
+Cleanverse `query_deposit_address` returned the treasury's institution-routed deposit address.
+Sending Circle Faucet Monad USDC there minted 20 aUSDC to the same eligible treasury wallet.
+Certus then deployed an aUSDC-configured escrow at
+`0x06bde498b5568cfb6fb89409ec2b2261576cc37f` and issued the contract an A-Pass.
+
+Live proof:
+- escrow eligibility returned code 4;
+- funding the escrow with aUSDC succeeded;
+- release to the eligible treasury succeeded in tx
+  `0x7058a447ea7fbb192f14b1d6b4a1b0a64e3d195dcd0ab53a60495d0f4c7bea0b`;
+- release to `0x00000000000000000000000000000000deadbeef` (no A-Pass) reverted at
+  the A-Token layer;
+- the blocked 0.1 aUSDC intent was quarantined in tx
+  `0xff3c99a488f479ffbf320c04af275d042b023201345e220b61f9f4b5cc1c1d63`.
+
+D1 is retained below as historical reasoning but is no longer the active custody design.
+
+---
+
 ## 2026-08-08 — Phase 0 locked decisions (from user)
 
 **D1. Escrow custody = fallback (c): custody the origin token.**
@@ -277,3 +314,21 @@ never checked the documented type of the one field we were changing.
 - Freeze-target identities are REUSABLE. The pool still has value (it removes a live write
   from the rehearsal path) but it is no longer burn-per-run.
 - The bug report to Cleanverse about un-freeze should be retracted. It was our error.
+
+## D14 — Phase 5 live exit verification deferred by Cleanverse outage (2026-08-08)
+
+Phase 5 recurring and payment-link implementation is locally complete and fail-closed. The
+Auditor reran the live revocation case with `.env` loaded, but Cleanverse returned an
+unavailable eligibility result, so the sandbox assertion could not reproduce the previously
+confirmed revocation signal. No fallback or cached eligibility was introduced. Before the
+demo, rerun the live `SUBSCRIPTION_EPOCH` scenario and record a halted subscription. Until
+then Phase 5 carries explicit external verification debt.
+
+## D15 — Phase 6 live dashboard audit debt (2026-08-08)
+
+The SSE endpoint was confirmed streaming 500ms heartbeats and the JSON compatibility snapshot
+returns current events. The production build and PDF export pass. The Codex in-app browser
+rendered the new server state but did not hydrate any client component, including the
+pre-existing theme toggle, so an actual click-to-freeze and sub-two-second visual transition
+could not be certified in that browser. Carry this into the Phase 7 Playwright rehearsal on a
+fresh browser runtime; do not claim the two-second exit until it passes there.

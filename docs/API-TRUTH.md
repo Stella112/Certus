@@ -225,11 +225,13 @@ Origin USDC rules: `[]` (empty) => ungated plain ERC20, custody-able by any cont
 ## Escrow custody conclusion (AC-0.5) — RESOLVED, design (c)
 
 - aUSDC transfers are gated on A-Pass eligibility (verify code 4). An address with no
-  A-Pass gets code 2 and cannot receive aUSDC. A bare escrow contract has no A-Pass.
+  A-Pass gets code 2 and cannot receive aUSDC. Proven 2026-08-08: a contract address can be
+  issued an A-Pass and then custody aUSDC directly.
 - Origin USDC is ungated (rules []), holdable by any contract.
-- DESIGN: CertusEscrow custodies ORIGIN USDC; the four-check pipeline (evaluate()) runs at
-  every release; aUSDC moves to the recipient only on PASS, where the A-Token's own on-chain
-  gate is the backstop; provenance PDF via download_travel_rule on the release txHash.
+- ACTIVE DESIGN (supersedes the original conclusion below): CertusEscrow custodies aUSDC
+  directly. The four-check pipeline (evaluate()) runs before release and the A-Token
+  independently rejects ineligible recipients on chain. Live transaction evidence is in
+  deployments/monad.json.
 - Fallback (a) Validator-pool registration NOT needed for the demo.
 
 ---
@@ -254,7 +256,10 @@ Testnet reset from genesis 2025-12-16, version v0.15.2. Cleanverse chain value: 
 
 ## Audit (to confirm in Phase 2/6 when a real settlement txHash exists)
 
-- POST /download_travel_rule { txHash, wallet } -> time-limited PDF URL. NOT yet called
+- POST /download_travel_rule { txHash, wallet } -> time-limited PDF URL. LIVE-CONFIRMED
+  2026-08-08 against a real Monad aUSDC transfer. UAT deviation: `fileName` was `null`
+  despite the v5.6 schema documenting a string; `downloadUrl` was valid. Certus preserves
+  the official URL and supplies a deterministic local filename.
   (needs a real settlement txHash). DOC-ONLY until Phase 2.
 - POST /query_txs, POST /query_institution_txs -> indexed history for dashboard. DOC-ONLY.
 
@@ -286,10 +291,32 @@ was probably NOT consumed. Retry once the reservoir is refilled.
 
 ### CONSEQUENCE: no obtainable origin USDC
 
-Three avenues exhausted: faucet reservoir empty, `mint()` permissioned, and guessed
-`/ramp/*` paths all 404. The ramp result is weak evidence: the paths were GUESSED, so this
-shows only that the real paths are unknown to us, not that no ramp exists. Escalated to the
-user rather than silently substituting a token, per D4 (single-mock rule).
+Three avenues exhausted: faucet reservoir empty, `mint()` permissioned, and the earlier
+`/ramp/*` paths all 404. The latter was weak evidence because those paths were guessed.
+Cleanverse Cooperate API v5.4 (2026-07-02) now documents the real Fiat Ramp module below.
+The ramp is an Issue Member capability and remains subject to Cleanverse market, A-Pass,
+and provider eligibility checks; a documented endpoint is not proof that this institution's
+UAT account is enabled.
+
+## Fiat Ramp — DOC-CONFIRMED IN API v5.4 (2026-07-02)
+
+Cleanverse documents a plain-JSON, two-step flow for both on-ramp and off-ramp:
+
+1. `POST /query_ramp_quote` with `isBuyOrSell: BUY|SELL`, currencies, network,
+   payment method, and the relevant amount. The response returns a single-use `quoteToken`
+   valid for 15 minutes.
+2. `POST /create_ramp_widget_url` with only that `quoteToken` and the end-user wallet
+   (`address`, `chain`), plus optional email/IP. Cleanverse returns an `orderId` and hosted
+   `widgetUrl`; the wallet must have a non-frozen A-Pass on the same chain.
+3. `POST /query_ramp_order` with `orderId` to poll `INIT`, `PROCESSING`, `COMPLETED`,
+   or terminal states such as `FAILED`, `REFUNDED`, and `EXPIRED`.
+
+Metadata endpoints are also documented: `POST /query_ramp_countries`,
+`/query_ramp_fiat_currencies`, `/query_ramp_crypto_currencies`, and
+`/query_ramp_payment_methods` (all with `{}`). All ramp calls use the normal `api-id`
+header and **no AES body encryption**. Known business errors include `RM_001` (no A-Pass),
+`RM_002` (frozen A-Pass), `RM_007` (missing/expired/reused quote token), and `RM_008`
+(wallet chain differs from quoted network).
 
 ## Escrow custody + release — TESTED ON CHAIN 2026-08-08 (Base Sepolia)
 

@@ -46,6 +46,16 @@ describe('audit store is append-only', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('enforces update and delete refusal at the SQLite boundary', () => {
+    const migration = fs.readFileSync(
+      path.resolve(process.cwd(), 'prisma/migrations/20260809000000_audit_event_immutability/migration.sql'),
+      'utf8',
+    );
+    expect(migration).toContain('AuditEvent_prevent_update');
+    expect(migration).toContain('AuditEvent_prevent_delete');
+    expect(migration.match(/RAISE\(ABORT, 'AuditEvent is append-only'\)/g)).toHaveLength(2);
+  });
+
   it('writes amounts as strings so a bigint can never become a float in the record', async () => {
     let captured: any = null;
     // Exercise the real serialiser via a stubbed prisma boundary.

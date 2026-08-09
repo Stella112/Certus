@@ -97,6 +97,16 @@ contract CertusEscrowTest is Test {
         escrow.fundIntent(INTENT, r, a);
     }
 
+    function test_fundIntent_rejectsZeroRecipient() public {
+        address[] memory recipients = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        recipients[0] = address(0);
+        amounts[0] = 1;
+        vm.prank(funder);
+        vm.expectRevert(CertusEscrow.ZeroRecipient.selector);
+        escrow.fundIntent(INTENT, recipients, amounts);
+    }
+
     // --- release ---
 
     function test_releaseLeg_paysRecipientAndAdvances() public {
@@ -106,7 +116,7 @@ contract CertusEscrowTest is Test {
 
         assertEq(token.balanceOf(alice), 10_000_000);
         assertEq(token.balanceOf(address(escrow)), 20_000_000);
-        (, , uint256 released, , ) = escrow.getIntent(INTENT);
+        (,, uint256 released,,) = escrow.getIntent(INTENT);
         assertEq(released, 10_000_000);
     }
 
@@ -133,7 +143,7 @@ contract CertusEscrowTest is Test {
         escrow.releaseLeg(INTENT, 1, AUDIT);
         escrow.releaseLeg(INTENT, 2, AUDIT);
         vm.stopPrank();
-        (, , , CertusEscrow.IntentStatus status, ) = escrow.getIntent(INTENT);
+        (,,, CertusEscrow.IntentStatus status,) = escrow.getIntent(INTENT);
         assertEq(uint256(status), uint256(CertusEscrow.IntentStatus.Completed));
         assertEq(token.balanceOf(address(escrow)), 0);
     }
@@ -151,7 +161,7 @@ contract CertusEscrowTest is Test {
         escrow.releaseLeg(INTENT, 1, AUDIT);
         vm.stopPrank();
 
-        (, , , CertusEscrow.IntentStatus status, bytes32 reason) = escrow.getIntent(INTENT);
+        (,,, CertusEscrow.IntentStatus status, bytes32 reason) = escrow.getIntent(INTENT);
         assertEq(uint256(status), uint256(CertusEscrow.IntentStatus.Frozen));
         assertEq(reason, REASON, "freeze reason must be recorded on chain");
     }
@@ -163,9 +173,9 @@ contract CertusEscrowTest is Test {
         escrow.freezeIntent(INTENT, REASON, AUDIT);
         vm.stopPrank();
 
-        (, , CertusEscrow.LegStatus l0) = escrow.getLeg(INTENT, 0);
-        (, , CertusEscrow.LegStatus l1) = escrow.getLeg(INTENT, 1);
-        (, , CertusEscrow.LegStatus l2) = escrow.getLeg(INTENT, 2);
+        (,, CertusEscrow.LegStatus l0) = escrow.getLeg(INTENT, 0);
+        (,, CertusEscrow.LegStatus l1) = escrow.getLeg(INTENT, 1);
+        (,, CertusEscrow.LegStatus l2) = escrow.getLeg(INTENT, 2);
         assertEq(uint256(l0), uint256(CertusEscrow.LegStatus.Released), "settled leg stays settled");
         assertEq(uint256(l1), uint256(CertusEscrow.LegStatus.Frozen));
         assertEq(uint256(l2), uint256(CertusEscrow.LegStatus.Frozen));

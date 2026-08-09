@@ -3,7 +3,7 @@
  * Three named sets, visibly different in the UI, so the engine is demonstrably real
  * rather than hardcoded to one path.
  *
- * Amounts are base units (6 decimals for aUSDC) as bigint. Never floats.
+ * Amounts are asset base units as bigint. Decimal precision comes from the chain registry. Never floats.
  */
 
 export type PolicyId = 'PERMISSIVE' | 'STANDARD' | 'STRICT';
@@ -54,8 +54,13 @@ export const POLICIES: Record<PolicyId, Policy> = {
   },
 };
 
-export function getPolicy(id: string): Policy {
+export function getPolicy(id: string, decimals = 6): Policy {
   const p = POLICIES[id as PolicyId];
   if (!p) throw new Error(`Unknown policyId "${id}". Valid: ${Object.keys(POLICIES).join(', ')}`);
-  return p;
+  if (decimals === 6) return p;
+  const scale = (value: bigint | null) => {
+    if (value === null) return null;
+    return decimals > 6 ? value * 10n ** BigInt(decimals - 6) : value / 10n ** BigInt(6 - decimals);
+  };
+  return { ...p, maxPerLeg: scale(p.maxPerLeg), dailyBudget: scale(p.dailyBudget) };
 }

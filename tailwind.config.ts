@@ -2,6 +2,7 @@ import type { Config } from 'tailwindcss';
 
 /** Brand per PART V: institutional fintech, not crypto. */
 const config: Config = {
+  darkMode: 'class',
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {

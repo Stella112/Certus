@@ -3,7 +3,9 @@ import path from 'node:path';
 import { prisma } from '../src/lib/db';
 import { listIdentities, verifyEligibility } from '../src/lib/cleanverse/cvi';
 import { assets } from '../src/lib/cleanverse/cva';
+import { defaultChain, deployment } from '../src/lib/chain/config';
 import { consumeFromPool, availableCount } from './identityPool';
+import { resetLocalStore } from './local-store-reset';
 
 /**
  * Deterministic demo seed. Same seed, same IDs, same ordering, every run (PART IV).
@@ -20,6 +22,7 @@ import { consumeFromPool, availableCount } from './identityPool';
 
 const ASSETS = assets();
 const CHAIN = ASSETS.chain;
+const ESCROW_ASSET = deployment(defaultChain()).escrowAsset ?? ASSETS.aToken;
 
 const UNVERIFIED_RECIPIENT = '0x00000000000000000000000000000000DeaDBeeF'; // verify -> code 2
 const USDC = (whole: number) => (BigInt(whole) * 1_000_000n).toString(); // 6 decimals, as string
@@ -81,17 +84,16 @@ console.log(`  freeze target claimed from pool: ${freezeTarget.address}`);
 // --- 3. Build deterministic demo state ----------------------------------------------
 const SENDER_ACME = verifiedAll[0]; // distinct from every entry in `verified` (F1-04)
 
-await prisma.auditEvent.deleteMany({});
-await prisma.leg.deleteMany({});
-await prisma.intent.deleteMany({});
+await resetLocalStore();
 
 // Milestone intent whose later legs are the freeze cascade in Moment B
 const milestone = await prisma.intent.create({
   data: {
     id: 'intent-milestone-001',
+    chain: defaultChain(),
     type: 'MILESTONE',
     senderCvi: SENDER_ACME,
-    asset: ASSETS.aToken,
+    asset: ESCROW_ASSET,
     amount: USDC(30_000),
     status: 'ACTIVE',
     policyId: 'STANDARD',
@@ -109,9 +111,10 @@ const milestone = await prisma.intent.create({
 const recurring = await prisma.intent.create({
   data: {
     id: 'intent-recurring-001',
+    chain: defaultChain(),
     type: 'RECURRING',
     senderCvi: SENDER_ACME,
-    asset: ASSETS.aToken,
+    asset: ESCROW_ASSET,
     amount: USDC(2_000),
     status: 'ACTIVE',
     policyId: 'STANDARD',
@@ -151,7 +154,7 @@ for (let i = 0; i < 20; i++) {
 const manifest = {
   generatedAt: new Date().toISOString(),
   chain: CHAIN,
-  asset: ASSETS,
+  asset: { ...ASSETS, escrowToken: ESCROW_ASSET },
   sender: SENDER_ACME,
   cleanRecipients: verified,
   unverifiedRecipient: UNVERIFIED_RECIPIENT,

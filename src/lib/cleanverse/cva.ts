@@ -1,6 +1,6 @@
 import { post } from './client';
 import { chainConfig } from '../chain/config';
-import { ATokenRulesSchema, parseOrNull } from './schemas';
+import { ATokenRulesSchema, DepositAssetListSchema, parseOrNull } from './schemas';
 import type { ATokenRule, Chain } from './types';
 
 /**
@@ -20,7 +20,7 @@ export function assets(chain?: string) {
     aToken: c.aToken,
     /** Per chain. BNB Chain is 18dp while the others are 6dp, so never hardcode this. */
     decimals: c.decimals,
-    symbol: 'aUSDC',
+    symbol: c.symbol,
   } as const;
 }
 
@@ -63,6 +63,29 @@ export async function getAssetRules(args: {
  *            which were themselves read from this endpoint.
  */
 export async function listDepositAssets(chain: Chain) {
-  const res = await post<{ chain: string; tokens: unknown[] }>('/query_deposit_atoken_list', { chain });
-  return res.kind === 'ok' ? res.data : null;
+  const res = await post<unknown>('/query_deposit_atoken_list', { chain });
+  if (res.kind !== 'ok') return null;
+  return parseOrNull(DepositAssetListSchema, res.data);
+}
+
+/** Live canonical pair preflight. Never deploy from the pinned registry alone. */
+export async function canonicalDepositAsset(chain: Chain, originAddress: string) {
+  const data = await listDepositAssets(chain);
+  return data?.tokens?.find((pair) => pair.origin_token.address.toLowerCase() === originAddress.toLowerCase()) ?? null;
+}
+
+/** Cleanverse Common Query: resolve the user's per-identity USDC deposit wallet. */
+export async function queryDepositAddress(args: { chain: Chain; address: string }) {
+  const res = await post<unknown>('/query_deposit_address', { chain: args.chain, address: args.address });
+  if (res.kind === 'business') return { ok: false as const, error: res.message, code: res.code };
+  if (res.kind === 'unavailable') return { ok: false as const, error: 'Cleanverse is temporarily unavailable.', detail: res.detail };
+  if (!res.data || typeof res.data !== 'object') return { ok: false as const, error: 'Cleanverse returned an unexpected deposit response.' };
+  const data = res.data as Record<string, unknown>;
+  if (typeof data.depositUSDCWallet !== 'string' || typeof data.address !== 'string' || typeof data.chain !== 'string') return { ok: false as const, error: 'Cleanverse returned no deposit wallet for this identity.' };
+  return { ok: true as const, data: {
+    address: data.address,
+    chain: data.chain,
+    depositUSDCWallet: data.depositUSDCWallet,
+    depositUSDTWallet: typeof data.depositUSDTWallet === 'string' ? data.depositUSDTWallet : data.depositUSDCWallet,
+  }};
 }

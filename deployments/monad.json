@@ -6,15 +6,83 @@
   "explorer": "https://testnet.monadscan.com",
   "deployedAt": "2026-08-08T12:40:00Z",
   "contracts": {
-    "CertusEscrow": {
+    "CertusUSD": {
+      "address": "0x857d6bb7464d6c2f4b7dd57a9cc2d1ef72539d44",
+      "deployTx": "0xaed72b0226009c7cdb13afc7a986e956a3468a09a8b387c0daad345da22dd4b1",
+      "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+      "symbol": "cUSD",
+      "decimals": 6,
+      "status": "origin token deployed; wrapped A-Token application pending"
+    },
+    "CertusEscrowOriginUSDC": {
       "address": "0xb327709Ec4f0830722776746b1da42F98d51868e",
       "deployTx": "0x5087de545224c2ae937fbc047bdcc61ef8c6a61a67733221a3cacd4abf1a6300",
       "constructorArgs": {
         "token": "0x534b2f3A21130d7a60830c2Df862319e593943A3"
+      },
+      "status": "legacy origin-token deployment"
+    },
+    "CertusEscrowAUSDC": {
+      "address": "0x06bde498b5568cfb6fb89409ec2b2261576cc37f",
+      "deployTx": "0x724e12d9e4de63eb22086cef10416443f664a16b648c1b8ba9d0b018d1ddbd2d",
+      "constructorArgs": {
+        "token": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D"
+      },
+      "aPassTx": "0xcc7da13397da5e59950b2fcf1501d11970c304590d674c7e79409198d89df2e3",
+      "eligibleReleaseTx": "0x7058a447ea7fbb192f14b1d6b4a1b0a64e3d195dcd0ab53a60495d0f4c7bea0b",
+      "assetGateProof": {
+        "recipient": "0x00000000000000000000000000000000deadbeef",
+        "result": "release reverted for recipient without A-Pass",
+        "quarantineTx": "0xff3c99a488f479ffbf320c04af275d042b023201345e220b61f9f4b5cc1c1d63",
+        "quarantinedAmount": "0.1 aUSDC"
       }
+    },
+    "CertusBatch": {
+      "address": "0xc41d94866af513e4460cb334ea416c5f892c8e3a",
+      "deployTx": "0x34de931b4c1712b44d73e2020bfa99e3cf663051eaded57706ae7977e3856ca9",
+      "constructorArgs": {
+        "token": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D"
+      },
+      "aPassTx": "0x93261d621fbfe9f04c1f2eeb22354624e0dfc7b2cd4dea84c0eb80d2d0d7a78d",
+      "status": "active batch isolation deployment"
+    },
+    "CertusEscrowYieldDemo": {
+      "address": "0x2f6dc0ff82b22d30f034e7768c88ca7f19bb9145",
+      "deployTx": "0x5006a58b34dcfbe3a368c0310909d3d29f168526004687f3fd1435999d3929ad",
+      "constructorArgs": {
+        "token": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D"
+      },
+      "aPassTx": "0x791b5bd17fb4c19a47322d4c786e506fdb9d22c2f8e7e2f1efa630f1e8fc2b66",
+      "yieldVault": "0x32e03df8fb317069c16fe0f5d5c296e35ca7fa11",
+      "yieldVaultDeployTx": "0xfc4c53d136ba5bf3361d9284c26c4bb05eb4bb83e8351b64892f326dbcdc07fd",
+      "yieldVaultAPassTx": "0x8cb797e1dd289a12e9ef2494e61fbab82fcd2448f99aa4542b13797d7471d525",
+      "configureTx": "0x47381460f820d96739969fd3a694509293dc51fcd6227d0fc83b38e4aaf67896",
+      "status": "testnet-only optional yield protection; fixed-rate mock vault"
+    },
+    "CertusSponsoredYieldVault": {
+      "address": "0xf09d1b75162f33b35e2fda2cfcf1e1de01118f1d",
+      "deployTx": "0x9594e5aef11621d9e25c7795858771e7195c219fd24bba9c885b1b755b46911a",
+      "constructorArgs": {
+        "token": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D"
+      },
+      "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+      "status": "testnet-only sponsored reserve; A-Pass authorization pending; not protocol-generated yield"
+    },
+    "CertusCustodiedYieldVault": {
+      "address": "0x5e38e163803a7d36d88b3d2656e93559f088dcb5",
+      "deployTx": "0xe6fffaa87eb0ce759475b33f162c4a5c6d040088a80724c2511f33e0e1c73c47",
+      "constructorArgs": {
+        "token": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
+        "custodian": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E"
+      },
+      "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
+      "status": "testnet-only custodial pilot; A-Pass custodian approved aUSDC payout allowance; not protocol-generated yield",
+      "authorizedAmount": "10000000",
+      "authorizationTx": "0xe45a6725707d4b21d5500bb862f6a568b5e6f92dd8fad6ae1acd66761abf36d2"
     }
   },
   "tokens": {
+    "certusOriginUSD": "0x857d6bb7464d6c2f4b7dd57a9cc2d1ef72539d44",
     "originUSDC": "0x534b2f3A21130d7a60830c2Df862319e593943A3",
     "aUSDC": "0xaC0893567D43C3E7e6e35a72803df05416C1f20D",
     "decimals": 6,
@@ -24,5 +92,5 @@
     "owner": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E",
     "releaser": "0xdC646c197d0202FC2A0326af8ab55066A3549E2E"
   },
-  "note": "Same address as the Base deployment: identical deployer and nonce produce the same CREATE address on every EVM chain. Convenient for a multi-chain deployment, and not a coincidence to rely on if the nonce ever diverges."
+  "note": "CertusEscrowAUSDC and CertusBatch are the active standard deployments. CertusEscrowYieldDemo is an optional testnet-only yield-protection path backed by MockYieldVault; it is not a production APY product. Standalone sponsored yield is testnet-only and reserve-funded by the deployer; it is not APY or production yield. Custodied yield pilot uses the A-Pass deployer EOA because canonical aUSDC rejects arbitrary vault contracts; it is testnet-only and not an APY promise."
 }

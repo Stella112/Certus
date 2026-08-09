@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { getPolicy } from './policies';
 import { ReasonCode } from './reasonCodes';
 import type { CheckResult, EvaluationContext } from './types';
+import { chainConfig, chainKeyForCleanverse, type ChainKey } from '../chain/config';
 
 /**
  * CHECK 4: institutional spending policy. Local layer per DECISIONS.md D2.
@@ -10,12 +11,12 @@ import type { CheckResult, EvaluationContext } from './types';
  */
 
 /** Sum of already-released legs for this sender in the trailing 24h, in base units. */
-export async function spentInWindow(senderAddress: string, since: Date): Promise<bigint> {
+export async function spentInWindow(senderAddress: string, since: Date, chain: ChainKey): Promise<bigint> {
   const legs = await prisma.leg.findMany({
     where: {
       status: 'RELEASED',
       releasedAt: { gte: since },
-      intent: { senderCvi: senderAddress },
+      intent: { senderCvi: senderAddress, chain },
     },
     select: { amount: true },
   });
@@ -24,7 +25,9 @@ export async function spentInWindow(senderAddress: string, since: Date): Promise
 }
 
 export async function checkPolicy(ctx: EvaluationContext, now: Date = new Date()): Promise<CheckResult> {
-  const policy = getPolicy(ctx.policyId);
+  const chain = chainKeyForCleanverse(ctx.chain);
+  const decimals = chainConfig(chain).decimals;
+  const policy = getPolicy(ctx.policyId, decimals);
 
   // 1. Per-leg amount cap
   if (policy.maxPerLeg !== null && ctx.amount > policy.maxPerLeg) {
@@ -70,7 +73,7 @@ export async function checkPolicy(ctx: EvaluationContext, now: Date = new Date()
   // 4. Rolling budget, derived from the audit-backed leg history
   if (policy.dailyBudget !== null) {
     const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const spent = await spentInWindow(ctx.senderAddress, since);
+    const spent = await spentInWindow(ctx.senderAddress, since, chain);
     if (spent + ctx.amount > policy.dailyBudget) {
       return {
         check: 'POLICY',

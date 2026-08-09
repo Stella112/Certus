@@ -5,7 +5,7 @@ import { recordEvent } from '../audit/record';
 import { ReasonCode } from '../pipeline/reasonCodes';
 import { assets } from '../cleanverse/cva';
 import { defaultChain, type ChainKey } from '../chain/config';
-import { ESCROW_ABI, escrowAddress, publicClient, releaserClient } from '../chain/escrow';
+import { ESCROW_ABI, escrowAddressForIntent, publicClient, releaserClient } from '../chain/escrow';
 import type { PolicyId } from '../pipeline/policies';
 
 /**
@@ -43,9 +43,16 @@ export async function releaseMilestone(args: {
   legSequence: number;
   chain?: ChainKey;
 }): Promise<ReleaseOutcome> {
-  const chain = args.chain ?? defaultChain();
   const intent = await prisma.intent.findUnique({ where: { id: args.intentId }, include: { legs: true } });
   if (!intent) throw new Error(`Unknown intent ${args.intentId}`);
+  const chain = args.chain ?? intent.chain ?? defaultChain();
+  if (chain !== intent.chain) throw new Error(`Intent ${intent.id} belongs to ${intent.chain}, not ${chain}`);
+  if (intent.type !== 'MILESTONE' && intent.type !== 'RECURRING') {
+    throw new Error(`Intent ${intent.id} is ${intent.type}, not a releasable escrow`);
+  }
+  if (intent.status !== 'ACTIVE' && intent.status !== 'FROZEN') {
+    throw new Error(`Intent ${intent.id} is ${intent.status}, not ACTIVE`);
+  }
 
   const leg = intent.legs.find((l) => l.sequence === args.legSequence);
   if (!leg) throw new Error(`Intent ${args.intentId} has no leg at sequence ${args.legSequence}`);
@@ -60,12 +67,21 @@ export async function releaseMilestone(args: {
       detail: 'Intent is frozen; remaining milestones are quarantined',
     };
   }
+  if (leg.status !== 'PENDING') throw new Error(`Leg ${leg.id} is ${leg.status}, not PENDING`);
 
   const A = assets(chain);
+  const escrow = escrowAddressForIntent(chain, intent.asset, intent.yieldMode);
+  const escrowToken = await publicClient(chain).readContract({
+    address: escrow, abi: ESCROW_ABI, functionName: 'token',
+  });
+  if (intent.asset.toLowerCase() !== escrowToken.toLowerCase()) {
+    throw new Error(`Intent ${intent.id} asset does not match the deployed ${chain} escrow token`);
+  }
   const decision = await evaluate({
     trigger: 'MILESTONE_RELEASE',
     chain: A.chain,
-    atoken: A.aToken,
+    atoken: intent.asset,
+    identityAtoken: intent.asset.toLowerCase() === A.originToken.toLowerCase() ? A.aToken : undefined,
     senderAddress: intent.senderCvi,
     recipientAddress: leg.recipientCvi,
     amount: BigInt(leg.amount),
@@ -91,14 +107,15 @@ export async function releaseMilestone(args: {
   const auditRef = onChainIntentId(`${intent.id}:${leg.id}`);
   const { client, account } = releaserClient(chain);
   const txHash = await client.writeContract({
-    address: escrowAddress(chain),
+    address: escrow,
     abi: ESCROW_ABI,
     functionName: 'releaseLeg',
     args: [onChainIntentId(intent.id), BigInt(args.legSequence - 1), auditRef],
     account,
     chain: null,
   });
-  await publicClient(chain).waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient(chain).waitForTransactionReceipt({ hash: txHash });
+  if (receipt.status !== 'success') throw new Error(`Release transaction ${txHash} reverted`);
 
   await prisma.leg.update({
     where: { id: leg.id },
@@ -135,9 +152,10 @@ export async function freezeCascade(args: {
   detail: string;
   chain?: ChainKey;
 }): Promise<{ frozen: true; txHash?: string; affectedIntents: string[] }> {
-  const chain = args.chain ?? defaultChain();
   const intent = await prisma.intent.findUnique({ where: { id: args.intentId }, include: { legs: true } });
   if (!intent) throw new Error(`Unknown intent ${args.intentId}`);
+  const chain = args.chain ?? intent.chain ?? defaultChain();
+  if (chain !== intent.chain) throw new Error(`Intent ${intent.id} belongs to ${intent.chain}, not ${chain}`);
 
   await prisma.intent.update({ where: { id: intent.id }, data: { status: 'FROZEN' } });
   await prisma.leg.updateMany({
@@ -147,16 +165,18 @@ export async function freezeCascade(args: {
 
   let txHash: string | undefined;
   try {
+    const escrow = escrowAddressForIntent(chain, intent.asset, intent.yieldMode);
     const { client, account } = releaserClient(chain);
     txHash = await client.writeContract({
-      address: escrowAddress(chain),
+      address: escrow,
       abi: ESCROW_ABI,
       functionName: 'freezeIntent',
       args: [onChainIntentId(intent.id), reasonToBytes32(args.reason), onChainIntentId(intent.id)],
       account,
       chain: null,
     });
-    await publicClient(chain).waitForTransactionReceipt({ hash: txHash as Hex });
+    const receipt = await publicClient(chain).waitForTransactionReceipt({ hash: txHash as Hex });
+    if (receipt.status !== 'success') throw new Error(`Freeze transaction ${txHash} reverted`);
   } catch (err) {
     // The DB freeze already happened and must stand: a chain failure must never leave the
     // system believing settlement is still permitted. Recorded, not swallowed.
@@ -193,9 +213,14 @@ export async function freezeAllForCounterparty(args: {
   reason: string;
   detail: string;
   chain?: ChainKey;
+  asset?: string;
 }): Promise<string[]> {
   const legs = await prisma.leg.findMany({
-    where: { recipientCvi: args.recipientAddress, status: 'PENDING' },
+    where: {
+      recipientCvi: args.recipientAddress,
+      status: 'PENDING',
+      ...((args.chain || args.asset) ? { intent: { ...(args.chain ? { chain: args.chain } : {}), ...(args.asset ? { asset: args.asset } : {}) } } : {}),
+    },
     include: { intent: true },
   });
   const intentIds = [...new Set(legs.filter((l) => l.intent.status === 'ACTIVE').map((l) => l.intentId))];

@@ -6,11 +6,47 @@
   color-scheme: light;
 }
 
+.dark { color-scheme: dark; }
+
 body {
   @apply bg-paper text-ink antialiased;
+  background-image:
+    radial-gradient(circle at 75% -15%, rgba(108, 123, 255, 0.13), transparent 34rem),
+    linear-gradient(180deg, #f8f9fc 0%, #f3f4f8 100%);
+  min-height: 100vh;
 }
+
+* { border-color: rgb(226 232 240); box-sizing: border-box; }
+
+::selection { background: rgba(91, 99, 232, 0.18); }
 
 /* Tabular numerals for every amount. Misaligned figures read as amateur. */
 .amount {
   font-variant-numeric: tabular-nums;
 }
+
+.agent-console input,
+.agent-console select {
+  @apply h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-ink outline-none transition focus:border-indigo-brand focus:ring-2 focus:ring-indigo-brand/15 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100;
+}
+
+.ramp-console input,
+.ramp-console select {
+  @apply h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs text-ink outline-none transition focus:border-indigo-brand focus:ring-2 focus:ring-indigo-brand/15 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100;
+}
+
+.dark body {
+  color: #e5e7eb;
+  background-image: radial-gradient(circle at 75% -15%, rgba(91,99,232,.14), transparent 34rem), linear-gradient(180deg,#080b12 0%,#0c111b 100%);
+}
+
+.dark .bg-white { background-color: #101622 !important; }
+.dark .bg-slate-50 { background-color: #151c29 !important; }
+.dark .bg-slate-100 { background-color: #1c2534 !important; }
+.dark .text-ink { color: #f1f5f9 !important; }
+.dark .text-slate-800, .dark .text-slate-700 { color: #dbe3ef !important; }
+.dark .text-slate-600, .dark .text-slate-500 { color: #9aa8bc !important; }
+.dark .text-slate-400 { color: #758399 !important; }
+.dark .border-slate-100, .dark .border-slate-200 { border-color: #202a39 !important; }
+.dark .ring-slate-100, .dark .ring-slate-200 { --tw-ring-color: #202a39 !important; }
+.dark ::selection { background: rgba(108,123,255,.32); }

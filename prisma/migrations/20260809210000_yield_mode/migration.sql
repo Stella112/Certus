@@ -1,0 +1,1 @@
+ALTER TABLE "Intent" ADD COLUMN "yieldMode" BOOLEAN NOT NULL DEFAULT false;

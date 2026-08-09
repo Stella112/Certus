@@ -98,6 +98,32 @@ export const GenerateApassSchema = z
   })
   .passthrough();
 
+/** download_travel_rule -> data. Both fields are required for a usable artifact. */
+export const TravelRuleReportSchema = z
+  .object({
+    downloadUrl: z.string().url(),
+    // UAT returned null for a valid transaction-report URL on 2026-08-08. The URL is the
+    // load-bearing artifact; callers create a deterministic fallback filename.
+    fileName: z.string().min(1).nullable(),
+  })
+  .passthrough();
+
+const DepositTokenSchema = z.object({
+  address: z.string(),
+  symbol: z.string(),
+  decimals: z.number().int().min(0).max(36),
+}).passthrough();
+
+export const DepositAssetListSchema = z.object({
+  chain: z.string(),
+  tokens: z.array(z.object({
+    origin_token: DepositTokenSchema,
+    atoken: DepositTokenSchema,
+    accesscore_address: z.string(),
+    apass_address: z.string(),
+  }).passthrough()).nullable(),
+}).passthrough();
+
 /**
  * Parse helper. Returns the typed value or null; callers translate null into a closed
  * reason code. Deliberately does NOT throw: throwing is what caused F1-01.

@@ -28,13 +28,19 @@ export interface EvaluationContext {
   chain: Chain;
   /** A-Token address the payment settles in. */
   atoken: string;
+  /** Identity credential asset used for checks when a payment settles in origin USDC. */
+  identityAtoken?: string;
   senderAddress: string;
   recipientAddress: string;
-  /** Base units (6 decimals for aUSDC). NEVER a number. */
+  /** Asset base units. Decimal precision comes from the chain registry. NEVER a number. */
   amount: bigint;
   policyId: PolicyId;
   intentId?: string;
   legId?: string;
+  /** Optional actor metadata for agent-originated requests. Never a private key. */
+  actorType?: 'HUMAN' | 'AGENT';
+  actorName?: string;
+  principalAddress?: string;
 }
 
 export type Decision =

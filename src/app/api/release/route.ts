@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { releaseMilestone } from '@/lib/settlement/release';
 import { ReasonText, type ReasonCode } from '@/lib/pipeline/reasonCodes';
 import { txUrl } from '@/lib/chain/config';
+import { listChains } from '@/lib/chain/config';
+import { requireOperator } from '@/lib/http/operator';
 
 /**
  * POST /api/release
@@ -19,10 +21,11 @@ export const dynamic = 'force-dynamic';
 const BodySchema = z.object({
   intentId: z.string().min(1),
   legSequence: z.number().int().positive(),
-  chain: z.string().optional(),
+  chain: z.string().refine((value) => listChains().includes(value), 'Unsupported chain').optional(),
 });
 
 export async function POST(req: Request) {
+  const denied = requireOperator(req); if (denied) return denied;
   let body: unknown;
   try {
     body = await req.json();

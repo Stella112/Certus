@@ -35,15 +35,18 @@ export async function sweepOnce(chain: ChainKey = defaultChain()): Promise<Watch
 
   // Only counterparties with money still at stake are worth polling.
   const legs = await prisma.leg.findMany({
-    where: { status: 'PENDING', intent: { status: 'ACTIVE' } },
-    select: { recipientCvi: true },
-    distinct: ['recipientCvi'],
+    where: { status: 'PENDING', intent: { status: 'ACTIVE', chain } },
+    select: { recipientCvi: true, intent: { select: { asset: true } } },
   });
+  const counterparties = [...new Map(legs.map((leg) => [
+    `${leg.recipientCvi.toLowerCase()}:${leg.intent.asset.toLowerCase()}`,
+    { recipientCvi: leg.recipientCvi, asset: leg.intent.asset },
+  ])).values()];
 
   const events: WatcherEvent[] = [];
 
-  for (const { recipientCvi } of legs) {
-    const outcome = await verifyEligibility({ chain: A.chain, atoken: A.aToken, address: recipientCvi });
+  for (const { recipientCvi, asset } of counterparties) {
+    const outcome = await verifyEligibility({ chain: A.chain, atoken: asset, address: recipientCvi });
 
     if (outcome.signal === 'ALLOWED') continue;
 
@@ -55,7 +58,18 @@ export async function sweepOnce(chain: ChainKey = defaultChain()): Promise<Watch
         verdict: 'FAIL',
         reasonCode: ReasonCode.CVI_UNAVAILABLE,
         checkResults: [],
-        payload: { watcher: true, address: recipientCvi, detail: outcome.detail },
+        payload: { watcher: true, address: recipientCvi, asset, detail: outcome.detail },
+      });
+      continue;
+    }
+
+    if (outcome.signal === 'ATOKEN_NOT_FOUND') {
+      await recordEvent({
+        eventType: 'CHECK_RUN',
+        verdict: 'FAIL',
+        reasonCode: ReasonCode.ATOKEN_NOT_FOUND,
+        checkResults: [],
+        payload: { watcher: true, address: recipientCvi, asset, detail: outcome.detail },
       });
       continue;
     }
@@ -69,7 +83,7 @@ export async function sweepOnce(chain: ChainKey = defaultChain()): Promise<Watch
       verdict: 'FREEZE',
       reasonCode: reason,
       checkResults: [],
-      payload: { watcher: true, address: recipientCvi, signal: outcome.signal, detail: outcome.detail },
+      payload: { watcher: true, address: recipientCvi, asset, signal: outcome.signal, detail: outcome.detail },
     });
 
     const frozenIntents = await freezeAllForCounterparty({
@@ -77,6 +91,7 @@ export async function sweepOnce(chain: ChainKey = defaultChain()): Promise<Watch
       reason,
       detail: outcome.detail,
       chain,
+      asset,
     });
 
     events.push({ address: recipientCvi, signal: outcome.signal, frozenIntents });

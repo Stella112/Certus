@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Certus</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4f57d9"/>
+      <stop offset="1" stop-color="#7885ff"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#g)" d="M397 337l47 48c-43 52-108 85-181 85C133 470 28 365 28 235S133 0 263 0c65 0 124 26 167 68l-50 50c-30-29-71-47-117-47-91 0-164 73-164 164s73 164 164 164c52 0 99-24 129-62z"/>
+  <path fill="url(#g)" d="M164 243l47-47 49 49L397 108l49 49-186 186z"/>
+</svg>

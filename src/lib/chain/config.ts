@@ -27,6 +27,13 @@ const ChainSchema = z.object({
   nativeSymbol: z.string().min(1),
   originToken: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   aToken: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+  symbol: z.string().min(1),
+  assetMode: z.enum(['canonical-deposit', 'self-issued']).default('canonical-deposit'),
+  selfIssuedAToken: z.object({
+    address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    symbol: z.string().min(1),
+    decimals: z.number().int().min(0).max(18),
+  }).optional(),
   decimals: z.number().int().min(0).max(18),
   /** Whether the Cleanverse Build announcement permits deploying here. */
   hackathonEligible: z.boolean(),
@@ -111,6 +118,13 @@ export function chainConfig(chain: ChainKey = defaultChain()): ChainConfig {
   return c;
 }
 
+/** Resolve a Cleanverse API chain value back to Certus's typed registry key. */
+export function chainKeyForCleanverse(cleanverseChain: string): ChainKey {
+  const key = listChains().find((candidate) => registry().chains[candidate].cleanverseChain === cleanverseChain);
+  if (!key) throw new Error(`No configured chain maps to Cleanverse chain "${cleanverseChain}"`);
+  return key;
+}
+
 export function txUrl(txHash: string, chain: ChainKey = defaultChain()): string {
   return `${chainConfig(chain).explorerUrl}/tx/${txHash}`;
 }
@@ -125,8 +139,9 @@ export function formatAmount(baseUnits: bigint, chain: ChainKey = defaultChain()
   const negative = baseUnits < 0n;
   const abs = negative ? -baseUnits : baseUnits;
   const divisor = 10n ** BigInt(decimals);
-  const frac = (abs % divisor).toString().padStart(decimals, '0');
-  return `${negative ? '-' : ''}${(abs / divisor).toString()}${decimals > 0 ? '.' + frac : ''}`;
+  const frac = (abs % divisor).toString().padStart(decimals, '0').replace(/0+$/, '');
+  const whole = (abs / divisor).toString();
+  return `${negative ? '-' : ''}${whole}${frac ? '.' + frac : ''}`;
 }
 
 /** Parse a decimal string into base units. Rejects anything that is not exact. */
@@ -139,9 +154,72 @@ export function parseAmount(value: string, chain: ChainKey = defaultChain()): bi
 }
 
 /** Deployed contract addresses for a chain, from deployments/<chain>.json. */
-export function deployment(chain: ChainKey = defaultChain()): { escrow?: string } {
+export interface ChainDeployment {
+  escrow?: string;
+  escrowAsset?: string;
+  escrowAssetSymbol?: string;
+  escrowAssetVerified?: boolean;
+  originEscrow?: string;
+  originEscrowAsset?: string;
+  batch?: string;
+  batchAsset?: string;
+  batchAssetSymbol?: string;
+  yieldEscrow?: string;
+  yieldAsset?: string;
+  yieldVault?: string;
+  yieldStatus?: string;
+  sponsoredYieldVault?: string;
+  sponsoredYieldStatus?: string;
+  sponsoredYieldCustodian?: string;
+  sponsoredYieldCustodyMode?: 'custodian_eoa' | 'contract';
+}
+
+export function deployment(chain: ChainKey = defaultChain()): ChainDeployment {
   const file = path.resolve(process.cwd(), 'deployments', `${chain}.json`);
   if (!fs.existsSync(file)) return {};
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  return { escrow: raw?.contracts?.CertusEscrow?.address };
+  const escrowRecord =
+    raw?.contracts?.CertusEscrowAUSDC ??
+    raw?.contracts?.CertusEscrow ??
+    raw?.contracts?.CertusEscrowOriginUSDC;
+  const originEscrowRecord = raw?.contracts?.CertusEscrowOriginUSDC;
+  const batchRecord = raw?.contracts?.CertusBatch;
+  const yieldRecord = raw?.contracts?.CertusEscrowYieldDemo;
+  // Prefer the live custodial pilot. The earlier contract remains in the
+  // deployment file as historical evidence but cannot hold canonical aUSDC.
+  const sponsoredYieldRecord = raw?.contracts?.CertusCustodiedYieldVault ?? raw?.contracts?.CertusSponsoredYieldVault;
+  const configured = chainConfig(chain);
+  const tokenSymbol = (address?: string) => {
+    if (!address) return undefined;
+    if (address.toLowerCase() === configured.aToken.toLowerCase()) return configured.symbol;
+    const match = Object.entries(raw?.tokens ?? {}).find(([, value]) =>
+      typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value) && value.toLowerCase() === address.toLowerCase()
+    );
+    return match?.[0] === 'certusOriginUSD' ? 'cUSD' : match?.[0];
+  };
+  const escrowAsset = escrowRecord?.constructorArgs?.token as string | undefined;
+  const canonicalAUsdc = raw?.tokens?.aUSDC as string | undefined;
+  const rawBatchAsset = batchRecord?.constructorArgs?.token as string | undefined;
+  const batchCompatible = !!rawBatchAsset && rawBatchAsset.toLowerCase() === configured.aToken.toLowerCase();
+  return {
+    escrow: escrowRecord?.address,
+    escrowAsset,
+    escrowAssetSymbol: tokenSymbol(escrowAsset),
+    escrowAssetVerified: !!escrowAsset &&
+      [configured.aToken, canonicalAUsdc].filter(Boolean).some((address) => address!.toLowerCase() === escrowAsset.toLowerCase()),
+    originEscrow: originEscrowRecord?.address as string | undefined,
+    originEscrowAsset: originEscrowRecord?.constructorArgs?.token as string | undefined,
+    // An old deployment bound to another asset is deliberately not exposed as active.
+    batch: batchCompatible ? batchRecord?.address : undefined,
+    batchAsset: batchCompatible ? rawBatchAsset : undefined,
+    batchAssetSymbol: batchCompatible ? tokenSymbol(rawBatchAsset) : undefined,
+    yieldEscrow: yieldRecord?.address as string | undefined,
+    yieldAsset: yieldRecord?.constructorArgs?.token as string | undefined,
+    yieldVault: yieldRecord?.yieldVault as string | undefined,
+    yieldStatus: yieldRecord?.status as string | undefined,
+    sponsoredYieldVault: sponsoredYieldRecord?.address as string | undefined,
+    sponsoredYieldStatus: sponsoredYieldRecord?.status as string | undefined,
+    sponsoredYieldCustodian: sponsoredYieldRecord?.constructorArgs?.custodian as string | undefined,
+    sponsoredYieldCustodyMode: raw?.contracts?.CertusCustodiedYieldVault ? 'custodian_eoa' : 'contract',
+  };
 }

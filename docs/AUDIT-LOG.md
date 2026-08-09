@@ -4,6 +4,157 @@ Appended after every phase. Format per PART VII.
 
 ---
 
+## PHASE 6 AUDIT: 2026-08-08T22:46:00+01:00
+
+### 1. Spec compliance
+| Requirement (quoted from spec) | Implemented? | File:line | Evidence |
+|---|---|---|---|
+| Operator console with live pre-flight panel | YES | `src/app/dashboard/page.tsx` | Four fresh-check indicators and real DB statistics render. |
+| Oversight dashboard with SSE stream, lineage graph, freeze controls | YES | `src/app/components/LiveOversight.tsx`; `src/app/api/events/stream/route.ts`; `src/app/api/freeze/route.ts` | SSE emits 500ms heartbeats; lineage and active-counterparty control render from DB. |
+| Point-in-time report export (PDF) | YES | `src/lib/audit/pdf.ts`; `src/app/api/audit/export/route.ts` | Route produced a 9,338-byte PDF; five rendered pages visually inspected. |
+| Freeze reflected within 2 seconds without refresh | PARTIAL | browser audit | Endpoint cadence is 500ms, but the in-app browser did not hydrate any client component. |
+
+### 2. Execution proof
+```text
+$ npm.cmd run typecheck
+> tsc --noEmit
+[exit 0]
+
+$ npm.cmd test -- --run test/unit
+Test Files  10 passed (10)
+Tests       46 passed (46)
+
+$ npm.cmd run build
+✓ Compiled successfully
+✓ Generating static pages (10/10)
+/api/audit/export, /api/events/stream, /api/freeze emitted
+
+$ curl.exe -N --max-time 3 http://localhost:3000/api/events/stream?chain=monad
+retry: 500
+: heartbeat 1786224956414
+
+$ Invoke-WebRequest http://localhost:3000/api/audit/export?chain=monad
+certus-audit-monad-route.pdf: 9338 bytes
+```
+
+### 3. Hallucination sweep
+- [x] Every Cleanverse call traced to an API-TRUTH.md section
+- [x] Zero invented endpoints, params, or response fields
+- [x] Every `VERIFIED: ASSUMED` adapter listed below
+Assumed adapters: NONE. Freeze uses the existing verified `freezeIdentity` adapter.
+
+### 4. Pipeline integrity
+- [x] `grep` for settlement paths bypassing `evaluate()` → freeze route changes credential status, then invokes the existing watcher cascade; it does not release value.
+- [x] All four checks actually execute (not short-circuited)
+- [x] Audit events written for every evaluation
+
+### 5. Money safety
+- [x] No float arithmetic on amounts (grep result: none in Phase 6)
+- [x] Decimals handled per token
+
+### 6. Findings
+| Severity | Finding | Location | Fix required before next phase? |
+|---|---|---|---|
+| HIGH (FIXED) | PDFKit failed when bundled by Next.js, causing export HTTP 500. | `next.config.mjs` | YES; fixed by server externalization. |
+| LOW (FIXED) | PDF footer created a blank sixth page. | `src/lib/audit/pdf.ts` | YES; fixed and visually re-rendered. |
+| MEDIUM | In-app browser rendered server state but did not hydrate client controls, including existing controls. | browser runtime | NO for Phase 7; YES before final rehearsal. |
+
+### 7. Line-by-line review
+Files read in full this phase: dashboard overview and audit pages, `LiveOversight.tsx`, SSE,
+freeze and PDF routes, PDF builder, revocation watcher, dashboard primitives and navigation.
+Specific concerns by line: no open code finding; browser-runtime debt recorded above.
+
+### 8. VERDICT: PASS WITH DEBT
+Debt carried forward: Phase 7 Playwright must perform a real freeze in a freshly hydrated
+browser and assert the FREEZE event appears within 2 seconds without reload.
+
+---
+
+## PHASE 5 AUDIT: 2026-08-08T22:18:31.1309867+01:00
+
+### 1. Spec compliance
+
+| Requirement (quoted from spec) | Implemented? | File:line | Evidence |
+|---|---|---|---|
+| Subscription schedule with epoch boundary re-evaluation | YES | `src/lib/settlement/recurring.ts:34,63` | Due-only processor calls `evaluate()` with `SUBSCRIPTION_EPOCH` before settlement. |
+| Payment link generation + inline CVI check on open, unverified → attestation flow | YES | `src/lib/settlement/payment-links.ts:18,55`; `src/app/api/links/[slug]/attest/route.ts:22-27` | Open is fail-closed; `NO_CVI` exposes an active-link-bound A-Pass flow. |
+| QR encoding | YES | `src/lib/settlement/payment-links.ts:40` | `qrcode` produces an SVG at the canonical payment URL. |
+| Subscription halts at next epoch after revocation | YES (LOCAL), LIVE DEBT | `src/lib/settlement/recurring.ts:82`; `test/unit/recurring-subscription.test.ts` | Regression proves halt executes and settlement never runs. Live sandbox was unavailable during audit. |
+
+### 2. Execution proof
+
+Commands run and their real output:
+
+```text
+$ npm.cmd run typecheck
+> tsc --noEmit
+[exit 0]
+
+$ npm.cmd test -- --run test/unit
+Test Files  10 passed (10)
+Tests       46 passed (46)
+
+$ npm.cmd run build
+✓ Compiled successfully
+✓ Generating static pages (10/10)
+/api/links, /api/links/[slug]/attest, /open, /qr,
+/api/subscriptions, /api/subscriptions/run, and /pay/[slug] emitted.
+
+$ node.exe --env-file=.env node_modules/vitest/vitest.mjs run test/integration/evaluate.live.test.ts -t "CASE 3" --reporter=verbose
+Expected: "FREEZE"
+Received: "FAIL"
+Test Files  1 failed (1)
+Tests       1 failed | 6 skipped (7)
+```
+
+The live failure was fail-closed `CVI_UNAVAILABLE`; no value moved and no cached success was
+used. This is external verification debt, not a passing live exit run.
+
+### 3. Hallucination sweep
+
+- [x] Every Cleanverse call traced to an API-TRUTH.md section
+- [x] Zero invented endpoints, params, or response fields
+- [x] Every `VERIFIED: ASSUMED` adapter listed below
+
+Assumed adapters: NONE. Attestation uses the existing sandbox-confirmed `generateIdentity` adapter.
+
+### 4. Pipeline integrity
+
+- [x] `grep` for settlement paths bypassing `evaluate()` → recurring delegates to `releaseMilestone`, which re-evaluates again before signing; payment-link open calls `evaluate()` directly. Contract-only transfer surfaces remain releaser-gated and were justified in earlier audits.
+- [x] All four checks actually execute (not short-circuited)
+- [x] Audit events written for every evaluation
+
+### 5. Money safety
+
+- [x] No float arithmetic on amounts (grep result: no `parseFloat`, fractional amount literal, or `Number(amount)` in Phase 5 paths)
+- [x] Decimals handled per token; Phase 5 persists decimal base-unit strings and converts only with `BigInt`
+
+Subscription registration additionally reads the on-chain escrow and rejects missing,
+inactive, already-released, or total-mismatched positions before creating an active schedule.
+
+### 6. Findings
+
+| Severity | Finding | Location | Fix required before next phase? |
+|---|---|---|---|
+| HIGH (FIXED) | Initial route created an active but unfunded recurring intent. | `src/app/api/subscriptions/route.ts` | YES, fixed with live on-chain registration checks. |
+| HIGH (FIXED) | Initial attestation route was not bound to its payment link. | `src/app/api/links/[slug]/attest/route.ts` | YES, fixed; chain now derives from active stored link. |
+| MEDIUM | Cleanverse sandbox unavailable prevented the required live subscription-revocation exit rehearsal. | external UAT | NO for Phase 6 implementation; YES before final demo rehearsal. |
+
+### 7. Line-by-line review
+
+Files read in full this phase: `prisma/schema.prisma`, migration SQL,
+`src/lib/settlement/recurring.ts`, `src/lib/settlement/payment-links.ts`, all Phase 5 route
+handlers, `/pay/[slug]` page and client, both Phase 5 unit suites, shared dashboard layout.
+
+Specific concerns by line: none open in code. Live exit debt recorded above and in DECISIONS.md.
+
+### 8. VERDICT: PASS WITH DEBT
+
+Debt carried forward: rerun a real Cleanverse revocation at a due `SUBSCRIPTION_EPOCH` and
+capture the resulting `HALTED` subscription before Phase 7/demo rehearsal.
+
+---
+
 ## PHASE 0 AUDIT: 2026-08-08T01:40Z
 
 Auditor read from disk, did not rely on Builder's narration. All verification calls
@@ -291,3 +442,128 @@ This is a narrow, well-understood defect with an obvious fix, not a design probl
 spinners and progressive row rendering); F1-05 binds Phase 7; escrow custody remains an
 inference until Phase 2 proves it with a real transfer (Phase 0 F-05); the freeze-target pool
 is down to 3 after this audit consumed 2, so top up before rehearsals.
+# PHASE 3 IMPLEMENTATION AUDIT — 2026-08-08
+
+## Scope
+
+Dedicated batch isolation contract, per-row settlement service, signed provenance artifacts,
+API/UI integration, and the one-command Moment A runner.
+
+## Execution proof
+
+- Foundry: 17/17 pass, including `test_momentA_nineSettleOneIsolatesAndBatchCompletes`.
+- Vitest: 33/33 pass, including continuation after an isolated row, chain-failure
+  containment, post-settlement projection safety, and EIP-712 signature verification.
+- TypeScript: `tsc --noEmit` passes.
+- Next production build passes with the batch and provenance routes.
+- Cleanverse `download_travel_rule` LIVE-CONFIRMED against release tx
+  `0x7058a447ea7fbb192f14b1d6b4a1b0a64e3d195dcd0ab53a60495d0f4c7bea0b`:
+  HTTP 200 artifact, `application/pdf`, 2,550 bytes, `%PDF-` signature. UAT returned a
+  valid URL with `fileName:null`; the adapter supplies a deterministic fallback filename.
+
+## Safety findings
+
+- PASS: only releasers can release or isolate rows.
+- PASS: one row's isolation is terminal and cannot affect later clean rows.
+- PASS: quarantined value has no refund, rescue, sweep, or withdrawal path.
+- PASS: a chain failure is contained to its row and later rows continue.
+- PASS after remediation: a failure after a confirmed transfer halts reconciliation and can
+  never reclassify that paid row as isolated.
+- PASS: every successful row receives an EIP-712 artifact bound to the batch contract,
+  batch id, leg id, sender, recipient, asset, amount, tx hash, audit hash, timestamp, and signer.
+- PASS: `preflight:batch` is read-only and blocks deployment when the pinned pair differs
+  from Cleanverse's live canonical metadata or the treasury is not eligible. Current result:
+  configured `0xaC08…f20D/6dp`, reported `0xfa96…1026/18dp`, `safeToDeploy:false`.
+- PASS: `audit:moment-a` is an independent read-only exit checker. It requires exactly ten
+  DB rows, nine successful Monad receipts, one isolated row, matching `CertusBatch` totals
+  and row states, and nine cryptographically valid provenance artifacts before writing a
+  PASS evidence file. It cannot sign or move value.
+
+## Exit-criterion status
+
+**NOT YET MET.** The required live 10-recipient run and nine live attestations cannot execute
+while Cleanverse's Monad supported-pair response points to an aUSDC that fails
+`verify_apass`. The previous pair still holds real value but now returns `atoken not exist`.
+The runner fails closed before funding. This is external debt, not permission to substitute
+mock rows or skip the live Auditor run.
+
+## Verdict
+
+**IMPLEMENTATION PASS; PHASE 3 REMAINS OPEN pending live Cleanverse repair and Auditor run.**
+
+---
+
+# PHASE 3 LIVE EXIT AUDIT — 2026-08-08T20:43:17.977Z
+
+## Spec compliance
+
+| Requirement | Implemented? | Evidence |
+|---|---|---|
+| Ten-recipient verified-asset batch | YES | Intent `moment-a-1786221700534` on Monad |
+| Nine eligible rows settle | YES | Nine successful Monad receipts and nine valid provenance signatures |
+| One unverified row isolates | YES | Row 5, `NO_CVI`, 10,000 base units quarantined |
+| Batch continues after isolation | YES | Rows 6 through 10 released after row 5 isolated |
+| On-chain accounting matches database | YES | total 100,000; released 90,000; quarantined 10,000; processed 10 |
+| Compliant settlement asset | YES | cvUSD `0x5e7Ca7ec42A11B4F5259fc429AcD32dFFf83796D`; treasury and batch A-Pass checks returned code 4 |
+
+## Execution proof
+
+- Batch contract: `0x840bfce4baebcb59c5b5d3bd8da7f67130fa47de`
+- Deployment transaction: `0xb14b67cd0713e2e3eacc0b515b3391861f535e9a3279422e1f5cc28f409e9dc0`
+- Funding transaction: `0xcf7bdee5330504dcf54b1b8090e6a6a24eb298a426e1556f312f2027117ada34`
+- Independent audit command: `tsx --env-file=.env scripts/audit-moment-a.ts`
+- Audit result: `PASS`, findings `[]`
+- Provenance verification: 9 of 9 valid
+
+## Findings
+
+None. The earlier external asset blocker was resolved by activating the already-issued standard
+cvUSD A-Token, granting documented mint authority, minting controlled testnet supply, and
+verifying both treasury and batch custody eligibility through Cleanverse.
+
+## VERDICT: PASS
+
+Phase 3 exit criterion is met. Phase 4 may begin.
+
+---
+
+# PHASE 4 IMPLEMENTATION AUDIT — 2026-08-08
+
+## Scope
+
+Fixed-rate `MockYieldVault`, optional escrow custody integration, accrual ticks, vault-backed
+milestone release, and terminal principal-plus-yield quarantine.
+
+## Execution proof
+
+- Foundry: 26/26 pass across all four suites.
+- Required freeze assertion: `test_freezeStopsYieldAtExactFreezeBlock` accrues for 100 blocks,
+  freezes, advances another 10,000 blocks, and proves both vault yield and escrow-recorded
+  quarantined yield remain exactly unchanged.
+- Compatibility assertion: all 12 pre-existing direct-custody escrow tests still pass.
+- Vault-backed release assertion: idle principal leaves escrow custody for the vault and a
+  compliant milestone release pays its recipient from that vault.
+- Configuration assertion: vault selection is one-time and is rejected after any funding has
+  begun, preventing old direct-custody intents from being rerouted.
+
+## Safety findings
+
+- PASS: the vault is explicitly labelled testnet-only and uses a fixed public rate.
+- PASS: only the bound escrow can deposit, release, or freeze value.
+- PASS: public `tick` changes accounting only and cannot transfer value.
+- PASS: freeze accrues through the freeze block atomically, then makes the position inactive
+  and permanently stops subsequent accrual.
+- PASS: remaining principal and accrued yield stay inside a frozen vault position.
+- PASS: neither escrow nor vault exposes refund, withdraw, sweep, rescue, or quarantine exit.
+- PASS: escrow records per-intent and aggregate quarantined yield independently of principal.
+
+## Findings
+
+One non-blocking documentation mismatch naming the superseded aUSDC deployment was found and
+corrected before the final audit run. No open findings remain.
+
+## VERDICT: PASS
+
+Phase 4 exit criterion is met. Phase 5 may begin.
+
+---

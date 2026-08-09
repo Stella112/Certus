@@ -62,6 +62,7 @@ await prisma.intent.deleteMany({ where: { id: intentDbId } });
 await prisma.intent.create({
   data: {
     id: intentDbId, type: 'MILESTONE', senderCvi: account.address, asset: A.aToken,
+    chain: CHAIN,
     amount: (LEG * 2n).toString(), status: 'ACTIVE', policyId: 'STANDARD',
     legs: { create: [
       { id: `${intentDbId}-l1`, recipientCvi: target.address, amount: LEG.toString(), sequence: 1, status: 'PENDING' },

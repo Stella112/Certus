@@ -1,0 +1,121 @@
+// Production/Vercel schema. The models intentionally mirror schema.prisma;
+// only the database provider differs so the local SQLite demo remains intact.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Intent {
+  id               String  @id @default(cuid())
+  chain            String  @default("monad")
+  type             String
+  senderCvi        String
+  asset            String
+  amount           String
+  status           String
+  policyId         String
+  privacyMode      String  @default("PUBLIC")
+  yieldMode        Boolean @default(false)
+  purposeType      String?
+  purposeReference String?
+  purposeHash      String?
+
+  legs         Leg[]
+  events       AuditEvent[]
+  subscription Subscription?
+  paymentLink  PaymentLink?
+  createdAt    DateTime @default(now())
+
+  @@index([senderCvi])
+  @@index([chain])
+  @@index([status])
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  intentId        String   @unique
+  intent          Intent   @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  recipientCvi    String
+  amount          String
+  intervalSeconds Int
+  nextEpochAt     DateTime
+  nextLegSequence Int      @default(1)
+  status          String   @default("ACTIVE")
+  lastProcessedAt DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([status, nextEpochAt])
+  @@index([recipientCvi])
+}
+
+model PaymentLink {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  intentId     String   @unique
+  intent       Intent   @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  recipientCvi String
+  amount       String
+  status       String   @default("ACTIVE")
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([status])
+}
+
+model AgentMandate {
+  id                  String   @id @default(cuid())
+  name                String
+  principalAddress    String
+  agentAddress        String
+  chain               String   @default("monad")
+  policyId            String
+  perTransactionLimit String
+  dailyLimit          String
+  expiresAt           DateTime?
+  status              String   @default("ACTIVE")
+  signature           String
+  createdAt           DateTime @default(now())
+
+  @@index([principalAddress])
+  @@index([agentAddress])
+  @@index([status])
+}
+
+model Leg {
+  id           String @id @default(cuid())
+  intentId     String
+  intent       Intent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  recipientCvi String
+  amount       String
+  sequence     Int
+  status       String
+  releasedAt   DateTime?
+  txHash       String?
+
+  @@index([intentId])
+  @@index([recipientCvi])
+  @@index([status])
+}
+
+model AuditEvent {
+  id           String  @id @default(cuid())
+  intentId     String?
+  intent       Intent? @relation(fields: [intentId], references: [id], onDelete: Cascade)
+  legId        String?
+  eventType    String
+  trigger      String?
+  verdict      String?
+  reasonCode   String?
+  checkResults String
+  payload      String
+  occurredAt   DateTime @default(now())
+
+  @@index([intentId])
+  @@index([occurredAt])
+  @@index([eventType])
+}

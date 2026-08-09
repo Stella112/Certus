@@ -244,10 +244,10 @@ export async function evaluate(ctx: EvaluationContext, deps: EvaluateDeps = defa
    */
   const settled = await Promise.allSettled([
     deps
-      .verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.senderAddress })
+      .verifyEligibility({ chain: ctx.chain, atoken: ctx.identityAtoken ?? ctx.atoken, address: ctx.senderAddress })
       .then((o) => eligibilityToCheck('SENDER_CVI', o)),
     deps
-      .verifyEligibility({ chain: ctx.chain, atoken: ctx.atoken, address: ctx.recipientAddress })
+      .verifyEligibility({ chain: ctx.chain, atoken: ctx.identityAtoken ?? ctx.atoken, address: ctx.recipientAddress })
       .then((o) => eligibilityToCheck('RECIPIENT_CVI', o)),
     checkAssetRules(ctx, deps),
     Promise.resolve().then(() => deps.checkPolicy(ctx)),
@@ -293,10 +293,14 @@ export async function evaluate(ctx: EvaluationContext, deps: EvaluateDeps = defa
       payload: {
         chain: ctx.chain,
         atoken: ctx.atoken,
+        ...(ctx.identityAtoken ? { identityAtoken: ctx.identityAtoken } : {}),
         sender: ctx.senderAddress,
         recipient: ctx.recipientAddress,
         amount: ctx.amount.toString(),
         policyId: ctx.policyId,
+        ...(ctx.actorType ? { actorType: ctx.actorType } : {}),
+        ...(ctx.actorName ? { actorName: ctx.actorName } : {}),
+        ...(ctx.principalAddress ? { principalAddress: ctx.principalAddress } : {}),
       },
     });
   } catch (err) {

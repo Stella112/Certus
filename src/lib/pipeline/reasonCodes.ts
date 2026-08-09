@@ -22,6 +22,10 @@ export const ReasonCode = {
   POLICY_RECIPIENT_NOT_ALLOWED: 'POLICY_RECIPIENT_NOT_ALLOWED',
   POLICY_WINDOW_CLOSED: 'POLICY_WINDOW_CLOSED',
 
+  // --- Purpose evidence ---
+  PURPOSE_REQUIRED: 'PURPOSE_REQUIRED',
+  PURPOSE_HASH_INVALID: 'PURPOSE_HASH_INVALID',
+
   // --- System integrity (Phase 1 audit F1-01) ---
   /** A check threw instead of returning a result. Never allowed to become a PASS. */
   SYSTEM_ERROR: 'SYSTEM_ERROR',
@@ -48,6 +52,8 @@ export const ReasonText: Record<ReasonCode, string> = {
   POLICY_BUDGET_EXCEEDED: 'Spending budget exhausted for this period',
   POLICY_RECIPIENT_NOT_ALLOWED: 'Recipient is not on the approved list',
   POLICY_WINDOW_CLOSED: 'Outside the permitted settlement window',
+  PURPOSE_REQUIRED: 'Proof of purpose is required for this payment',
+  PURPOSE_HASH_INVALID: 'Proof-of-purpose hash is invalid',
   SYSTEM_ERROR: 'Compliance check failed to complete, settlement held',
   AUDIT_WRITE_FAILED: 'Compliance record could not be written, settlement held',
   MALFORMED_RESPONSE: 'Identity service returned an unrecognised response, settlement held',

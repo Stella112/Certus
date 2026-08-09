@@ -10,6 +10,7 @@ import { chainConfig, deployment, type ChainKey } from './config';
  */
 
 export const ESCROW_ABI = parseAbi([
+  'function token() view returns (address)',
   'function fundIntent(bytes32 intentId, address[] recipients, uint256[] amounts)',
   'function releaseLeg(bytes32 intentId, uint256 legIndex, bytes32 auditRef)',
   'function freezeIntent(bytes32 intentId, bytes32 reasonCode, bytes32 auditRef)',
@@ -26,6 +27,31 @@ export const ERC20_ABI = parseAbi([
   'function approve(address spender, uint256 amount) returns (bool)',
   'function balanceOf(address account) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
+]);
+
+export const BATCH_ABI = parseAbi([
+  'function token() view returns (address)',
+  'function fundBatch(bytes32 batchId, address[] recipients, uint256[] amounts)',
+  'function releaseRow(bytes32 batchId, uint256 rowIndex, bytes32 auditRef)',
+  'function isolateRow(bytes32 batchId, uint256 rowIndex, bytes32 reasonCode, bytes32 auditRef)',
+  'function getBatch(bytes32 batchId) view returns (address,uint256,uint256,uint256,uint256,uint8)',
+  'function rowCount(bytes32 batchId) view returns (uint256)',
+  'function getRow(bytes32 batchId, uint256 rowIndex) view returns (address,uint256,uint8,bytes32)',
+  'function totalQuarantined() view returns (uint256)',
+  'event RowReleased(bytes32 indexed batchId, uint256 indexed rowIndex, address indexed recipient, uint256 amount, bytes32 auditRef)',
+  'event RowIsolated(bytes32 indexed batchId, uint256 indexed rowIndex, address indexed recipient, uint256 amount, bytes32 reasonCode, bytes32 auditRef)',
+]);
+
+export const SPONSORED_YIELD_ABI = parseAbi([
+  'function token() view returns (address)',
+  'function reserve() view returns (uint256)',
+  'function previewBonus(address account) view returns (uint256)',
+  'function positionOf(address account) view returns (uint256 principal, uint256 bonus, uint256 lastAccrualBlock, bool active, bool frozen)',
+  'function deposit(uint256 amount)',
+  'function withdraw() returns (uint256 principal, uint256 bonus)',
+  'event Deposited(address indexed account, uint256 amount)',
+  'event Withdrawn(address indexed account, uint256 principal, uint256 bonus)',
+  'event PositionFrozen(address indexed account, uint256 principal, uint256 bonus, bytes32 reasonCode)',
 ]);
 
 function viemChain(chain: ChainKey) {
@@ -60,6 +86,35 @@ export function escrowAddress(chain: ChainKey): Hex {
   const addr = deployment(chain).escrow;
   if (!addr) {
     throw new Error(`No CertusEscrow deployment recorded for "${chain}". Expected deployments/${chain}.json`);
+  }
+  return addr as Hex;
+}
+
+/** Resolve the escrow deployment that is bound to a declared intent asset. */
+export function escrowAddressForAsset(chain: ChainKey, asset: string): Hex {
+  const d = deployment(chain);
+  if (d.escrow && d.escrowAsset?.toLowerCase() === asset.toLowerCase()) return d.escrow as Hex;
+  if (d.originEscrow && d.originEscrowAsset?.toLowerCase() === asset.toLowerCase()) return d.originEscrow as Hex;
+  throw new Error(`No Certus escrow on "${chain}" is bound to asset ${asset}`);
+}
+
+export function escrowAddressForIntent(chain: ChainKey, asset: string, yieldMode = false): Hex {
+  if (yieldMode) {
+    const candidate = deployment(chain).yieldEscrow;
+    if (!candidate) throw new Error(`No yield-protection escrow on "${chain}"`);
+    const yieldAsset = deployment(chain).yieldAsset;
+    if (!yieldAsset || yieldAsset.toLowerCase() !== asset.toLowerCase()) {
+      throw new Error(`Yield escrow on "${chain}" is not bound to asset ${asset}`);
+    }
+    return candidate as Hex;
+  }
+  return escrowAddressForAsset(chain, asset);
+}
+
+export function batchAddress(chain: ChainKey): Hex {
+  const addr = deployment(chain).batch;
+  if (!addr) {
+    throw new Error(`No CertusBatch deployment recorded for "${chain}". Expected deployments/${chain}.json`);
   }
   return addr as Hex;
 }
